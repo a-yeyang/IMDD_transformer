@@ -1,7 +1,7 @@
 import torch
 import scipy.io
 import numpy as np
-from train_pit import PhysicsInformedTransformer, CONFIG, OpticalDataset # 导入模型定义
+from train_pit import LightweightTransformerEQ, CONFIG, OpticalDataset
 from torch.utils.data import DataLoader
 
 def calculate_ber(pred, true_labels):
@@ -40,9 +40,19 @@ def test():
     test_dataset = OpticalDataset(rx_test, symb_test, CONFIG['window_size'], CONFIG['sps'])
     test_loader = DataLoader(test_dataset, batch_size=1024, shuffle=False)
     
-    # 3. 加载模型
-    model = PhysicsInformedTransformer(CONFIG['window_size'], CONFIG['d_model'], CONFIG['nhead'], CONFIG['num_layers']).to(device)
-    model.load_state_dict(torch.load('pit_model.pth'))
+    # 3. 加载模型 (参数与训练时保持一致)
+    model = LightweightTransformerEQ(
+        input_dim=CONFIG['window_size'],
+        d_model=CONFIG['d_model'],
+        nhead=CONFIG['nhead'],
+        num_layers=CONFIG['num_layers'],
+        dim_feedforward=CONFIG['dim_feedforward'],
+        num_passes=CONFIG['num_passes'],
+        use_weight_sharing=CONFIG['use_weight_sharing'],
+        use_center_token=CONFIG['use_center_token'],
+        use_sinusoidal_pe=CONFIG['use_sinusoidal_pe'],
+    ).to(device)
+    model.load_state_dict(torch.load('pit_model.pth', weights_only=True))
     model.eval()
     
     all_preds = []
