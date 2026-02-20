@@ -20,19 +20,25 @@ CONFIG = {
     'use_center_token': True,   # True: 只取中心token; False: flatten全部token
     'use_sinusoidal_pe': True,  # True: 固定正弦编码(0参数); False: 可学习编码
     'batch_size': 256,
-    'epochs': 50,
+    'epochs': 150,
     'lr': 0.001,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 }
 
 # ================= 数据集定义 =================
 class OpticalDataset(Dataset):
-    def __init__(self, rx_signal, labels, window_size, sps):
+    def __init__(self, rx_signal, labels, window_size, sps,
+                 rx_mean=None, rx_std=None, label_scale=3.0):
         self.rx = rx_signal
         self.labels = labels
         self.w = window_size
         self.sps = sps
+        self.label_scale = label_scale
         self.n_samples = len(labels) - (window_size // sps) - 1
+
+        # 全局归一化统计量 (用整个信号计算，而非逐窗口)
+        self.rx_mean = rx_mean if rx_mean is not None else np.mean(rx_signal)
+        self.rx_std = rx_std if rx_std is not None else np.std(rx_signal)
 
     def __len__(self):
         return self.n_samples
@@ -41,9 +47,16 @@ class OpticalDataset(Dataset):
         start_sample = idx * self.sps
         end_sample = start_sample + self.w
         x_seq = self.rx[start_sample:end_sample]
-        x_seq = x_seq / (np.std(x_seq) + 1e-8)
+
+        # 全局归一化 (稳定，不受窗口长度影响)
+        x_seq = (x_seq - self.rx_mean) / (self.rx_std + 1e-8)
+
         label_idx = idx + (self.w // self.sps) // 2
         y = self.labels[label_idx]
+
+        # 标签归一化: {-3,-1,1,3} -> {-1,-1/3,1/3,1}
+        y = y / self.label_scale
+
         return torch.FloatTensor(x_seq.real), torch.FloatTensor([y])
 
 # ================= 固定正弦位置编码 (零参数) =================
@@ -150,7 +163,13 @@ def train():
 
     symb_train = data['symb_train_export'].flatten()
 
-    train_dataset = OpticalDataset(rx_train, symb_train, CONFIG['window_size'], CONFIG['sps'])
+    # 计算全局归一化参数 (训练集统计量，测试时也要复用)
+    rx_mean = np.mean(rx_train)
+    rx_std = np.std(rx_train)
+    print(f"全局统计: rx_mean={rx_mean:.4f}, rx_std={rx_std:.4f}")
+
+    train_dataset = OpticalDataset(rx_train, symb_train, CONFIG['window_size'], CONFIG['sps'],
+                                   rx_mean=rx_mean, rx_std=rx_std)
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], shuffle=True, num_workers=0)
 
     model = LightweightTransformerEQ(
@@ -171,6 +190,7 @@ def train():
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=CONFIG['lr'])
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CONFIG['epochs'], eta_min=1e-5)
 
     loss_history = []
     model.train()
@@ -188,12 +208,19 @@ def train():
 
             epoch_loss += loss.item()
 
+        scheduler.step()
         avg_loss = epoch_loss / len(train_loader)
         loss_history.append(avg_loss)
-        print(f"Epoch {epoch+1}/{CONFIG['epochs']}, Loss: {avg_loss:.6f}")
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1}/{CONFIG['epochs']}, Loss: {avg_loss:.6f}, LR: {current_lr:.6f}")
 
-    torch.save(model.state_dict(), 'pit_model.pth')
-    print("模型已保存。")
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'rx_mean': rx_mean,
+        'rx_std': rx_std,
+        'config': CONFIG,
+    }, 'pit_model.pth')
+    print("模型及归一化参数已保存。")
 
     plt.plot(loss_history)
     plt.title('Training Loss')
