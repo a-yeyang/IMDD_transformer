@@ -216,6 +216,7 @@ def train():
 
     torch.save({
         'model_state_dict': model.state_dict(),
+        'model_type': 'TEQ',
         'rx_mean': rx_mean,
         'rx_std': rx_std,
         'config': CONFIG,
