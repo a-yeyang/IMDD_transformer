@@ -226,8 +226,11 @@ def train():
     plt.plot(loss_history)
     plt.title('Training Loss')
     plt.xlabel('Epoch')
-    plt.ylabel('MSE')
-    plt.show()
+    plt.ylabel('MSE Loss')
+    plt.tight_layout()
+    plt.savefig('teq_training_loss.png', dpi=150, bbox_inches='tight')
+    plt.close()
+    print("训练曲线已保存: teq_training_loss.png")
 
 if __name__ == '__main__':
     train()

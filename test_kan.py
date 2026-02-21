@@ -11,8 +11,13 @@ import torch
 import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from torch.utils.data import DataLoader
+
+# 解决 matplotlib 中文乱码：优先使用微软雅黑，回退到黑体
+matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False  # 修复负号显示为方块的问题
 
 # 从训练脚本导入模型定义和数据集
 from train_teq import (
@@ -258,8 +263,8 @@ def test():
     plt.tight_layout()
     out_fig = 'kan_ber_comparison.png'
     plt.savefig(out_fig, dpi=150, bbox_inches='tight')
+    plt.close()
     print(f"\n[INFO] BER 对比图已保存: {out_fig}")
-    plt.show()
 
 
 if __name__ == '__main__':
