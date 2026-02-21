@@ -65,9 +65,11 @@
   改善幅度 = (TEQ_BER - KAN_BER) / TEQ_BER × 100%，正值表示 KAN 更优。
 
 
+python train_kan_teq.py & python train_teq.py & python test_kan.py
 
 
 
+python train_kan_teq.py ; python train_teq.py;python test_kan.py;
 
 
 
