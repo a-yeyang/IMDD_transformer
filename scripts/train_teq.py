@@ -6,6 +6,14 @@ import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from pathlib import Path
+
+# 项目根目录（scripts/ 的上一级）
+ROOT       = Path(__file__).parent.parent
+MODELS_DIR = ROOT / 'models'
+IMAGES_DIR = ROOT / 'images'
+MODELS_DIR.mkdir(exist_ok=True)
+IMAGES_DIR.mkdir(exist_ok=True)
 
 # ================= 配置参数 =================
 CONFIG = {
@@ -155,7 +163,7 @@ def count_parameters(model):
 def train():
     print(f"Running on {CONFIG['device']}")
 
-    data = scipy.io.loadmat('dataset_for_python.mat')
+    data = scipy.io.loadmat(str(ROOT / 'dataset_for_python.mat'))
     rx_train = data['rx_train_export'].flatten()
     if np.iscomplexobj(rx_train):
         print("检测到复数信号，取实部用于PAM4 IM/DD处理")
@@ -214,23 +222,25 @@ def train():
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch+1}/{CONFIG['epochs']}, Loss: {avg_loss:.6f}, LR: {current_lr:.6f}")
 
+    save_path = MODELS_DIR / 'teq_model.pth'
     torch.save({
         'model_state_dict': model.state_dict(),
         'model_type': 'TEQ',
         'rx_mean': rx_mean,
         'rx_std': rx_std,
         'config': CONFIG,
-    }, 'teq_model.pth')
-    print("模型及归一化参数已保存。")
+    }, str(save_path))
+    print(f"模型及归一化参数已保存: {save_path}")
 
     plt.plot(loss_history)
     plt.title('Training Loss')
     plt.xlabel('Epoch')
     plt.ylabel('MSE Loss')
     plt.tight_layout()
-    plt.savefig('teq_training_loss.png', dpi=150, bbox_inches='tight')
+    fig_path = IMAGES_DIR / 'teq_training_loss.png'
+    plt.savefig(str(fig_path), dpi=150, bbox_inches='tight')
     plt.close()
-    print("训练曲线已保存: teq_training_loss.png")
+    print(f"训练曲线已保存: {fig_path}")
 
 if __name__ == '__main__':
     train()

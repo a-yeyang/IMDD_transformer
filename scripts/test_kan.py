@@ -14,6 +14,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from torch.utils.data import DataLoader
+from pathlib import Path
+
+# 项目根目录（scripts/ 的上一级）
+ROOT       = Path(__file__).parent.parent
+MODELS_DIR = ROOT / 'models'
+IMAGES_DIR = ROOT / 'images'
+IMAGES_DIR.mkdir(exist_ok=True)
 
 # 解决 matplotlib 中文乱码：优先使用微软雅黑，回退到黑体
 matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
@@ -161,7 +168,7 @@ def test():
     print("=" * 68)
 
     # ---------- 加载测试数据 ----------
-    data = scipy.io.loadmat('dataset_for_python.mat')
+    data = scipy.io.loadmat(str(ROOT / 'dataset_for_python.mat'))
     rx_test_base = data['rx_test_export'].flatten()
     if np.iscomplexobj(rx_test_base):
         print("[INFO] 检测到复数信号，取绝对值作为 IM/DD 包络。")
@@ -174,9 +181,9 @@ def test():
     print(f"[INFO] 测试符号数:               {len(symb_test):,}")
 
     # ---------- 加载 checkpoint 中的归一化参数 ----------
-    teq_ckpt = torch.load('teq_model.pth',     weights_only=False,
+    teq_ckpt = torch.load(str(MODELS_DIR / 'teq_model.pth'),     weights_only=False,
                           map_location='cpu')
-    kan_ckpt = torch.load('kan_teq_model.pth', weights_only=False,
+    kan_ckpt = torch.load(str(MODELS_DIR / 'kan_teq_model.pth'), weights_only=False,
                           map_location='cpu')
 
     teq_mean = float(teq_ckpt['rx_mean'])
@@ -202,13 +209,13 @@ def test():
         for snr in SNR_LIST:
             ft = executor.submit(
                 run_teq_snr, snr, rx_test_base, symb_test,
-                'teq_model.pth', teq_config, teq_mean, teq_std,
+                str(MODELS_DIR / 'teq_model.pth'), teq_config, teq_mean, teq_std,
             )
             future_map[ft] = ('TEQ', snr)
 
             fk = executor.submit(
                 run_kan_snr, snr, rx_test_base, symb_test,
-                'kan_teq_model.pth', kan_config, kan_mean, kan_std,
+                str(MODELS_DIR / 'kan_teq_model.pth'), kan_config, kan_mean, kan_std,
             )
             future_map[fk] = ('KAN', snr)
 
@@ -261,8 +268,8 @@ def test():
     ax.grid(True, which='both', linestyle='--', alpha=0.6)
 
     plt.tight_layout()
-    out_fig = 'kan_ber_comparison.png'
-    plt.savefig(out_fig, dpi=150, bbox_inches='tight')
+    out_fig = IMAGES_DIR / 'kan_ber_comparison.png'
+    plt.savefig(str(out_fig), dpi=150, bbox_inches='tight')
     plt.close()
     print(f"\n[INFO] BER 对比图已保存: {out_fig}")
 

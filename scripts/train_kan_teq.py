@@ -6,6 +6,14 @@ import scipy.io
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from pathlib import Path
+
+# 项目根目录（scripts/ 的上一级）
+ROOT       = Path(__file__).parent.parent
+MODELS_DIR = ROOT / 'models'
+IMAGES_DIR = ROOT / 'images'
+MODELS_DIR.mkdir(exist_ok=True)
+IMAGES_DIR.mkdir(exist_ok=True)
 
 # ================= 配置参数 =================
 CONFIG = {
@@ -198,7 +206,7 @@ def count_parameters(model):
 def train():
     print(f"Running KAN-Former on {CONFIG['device']}")
     # ... 数据加载部分同原版一致 ...
-    data = scipy.io.loadmat('dataset_for_python.mat')
+    data = scipy.io.loadmat(str(ROOT / 'dataset_for_python.mat'))
     rx_train = data['rx_train_export'].flatten()
     if np.iscomplexobj(rx_train):
         rx_train = np.abs(rx_train)
@@ -256,13 +264,14 @@ def train():
             current_lr = optimizer.param_groups[0]['lr']
             print(f"Epoch {epoch + 1}/{CONFIG['epochs']}, Loss: {avg_loss:.6f}, LR: {current_lr:.6f}")
 
+    save_path = MODELS_DIR / 'kan_teq_model.pth'
     torch.save({
         'model_state_dict': model.state_dict(),
         'rx_mean': rx_mean,
         'rx_std': rx_std,
         'config': CONFIG,
-    }, 'kan_teq_model.pth')
-    print("KAN-Former 模型已保存。")
+    }, str(save_path))
+    print(f"KAN-Former 模型已保存: {save_path}")
 
 
 if __name__ == '__main__':
