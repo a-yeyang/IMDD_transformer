@@ -20,7 +20,7 @@ CONFIG = {
     'use_center_token': True,   # True: 只取中心token; False: flatten全部token
     'use_sinusoidal_pe': True,  # True: 固定正弦编码(0参数); False: 可学习编码
     'batch_size': 256,
-    'epochs': 150,
+    'epochs': 50,
     'lr': 0.001,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 }
