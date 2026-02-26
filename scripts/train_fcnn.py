@@ -18,6 +18,17 @@ MODELS_DIR.mkdir(exist_ok=True)
 IMAGES_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
+
+# ================= 环境识别：自动选择计算设备 =================
+def get_device():
+    """自动识别：NVIDIA CUDA > Apple MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
+
 # ================= 配置参数 =================
 CONFIG = {
     'window_size': 21,
@@ -28,7 +39,7 @@ CONFIG = {
     'lr': 0.001,
     'label_scale': 3.0,
     'eval_interval': 1,
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+    'device': get_device()
 }
 
 
@@ -147,7 +158,9 @@ def train():
     log.info("=" * 60)
     log.info("  FCNN Equalizer — 训练开始")
     log.info("=" * 60)
-    log.info(f"运行设备: {CONFIG['device']}")
+    dev = CONFIG['device']
+    log.info(f"运行设备: {dev} (NVIDIA CUDA)" if dev == 'cuda' else
+             f"运行设备: {dev} (Apple MPS)" if dev == 'mps' else f"运行设备: {dev} (CPU)")
     log.info(f"配置参数: {CONFIG}")
 
     # ---------- 数据加载 ----------

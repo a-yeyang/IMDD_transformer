@@ -14,6 +14,16 @@
 import torch
 import scipy.io
 import numpy as np
+
+
+# ================= 环境识别：自动选择计算设备 =================
+def get_device():
+    """自动识别：NVIDIA CUDA > Apple MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 import matplotlib
 import matplotlib.pyplot as plt
 import logging
@@ -253,6 +263,14 @@ def test():
     log.info("=" * 72)
     log.info("   五种均衡器综合对比 — BER vs SNR")
     log.info("=" * 72)
+
+    _device = get_device()
+    log.info(f"[INFO] 运行设备: {_device} (NVIDIA CUDA)" if _device == 'cuda' else
+             f"[INFO] 运行设备: {_device} (Apple MPS)" if _device == 'mps' else
+             f"[INFO] 运行设备: {_device} (CPU)")
+    # 统一各模型 config 的 device
+    for entry in MODEL_REGISTRY:
+        entry['default_config']['device'] = _device
 
     # ---------- 检查可用模型 ----------
     available = []

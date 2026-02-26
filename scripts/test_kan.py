@@ -10,6 +10,16 @@ KAN-Former vs Transformer TEQ 均衡器对比测试
 import torch
 import scipy.io
 import numpy as np
+
+
+# ================= 环境识别：自动选择计算设备 =================
+def get_device():
+    """自动识别：NVIDIA CUDA > Apple MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 import matplotlib
 import matplotlib.pyplot as plt
 import logging
@@ -227,6 +237,12 @@ def test():
 
     teq_config = dict(TEQ_CONFIG)
     kan_config = dict(KAN_CONFIG)
+    # 确保测试使用当前环境的设备
+    _device = get_device()
+    teq_config['device'] = kan_config['device'] = _device
+    log.info(f"[INFO] 运行设备: {_device} (NVIDIA CUDA)" if _device == 'cuda' else
+             f"[INFO] 运行设备: {_device} (Apple MPS)" if _device == 'mps' else
+             f"[INFO] 运行设备: {_device} (CPU)")
 
     # ---------- 并行提交所有 SNR 测试任务 ----------
     teq_results = {}

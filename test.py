@@ -3,6 +3,16 @@ import scipy.io
 import numpy as np
 import os
 from torch.utils.data import DataLoader
+
+
+# ================= 环境识别：自动选择计算设备 =================
+def get_device():
+    """自动识别：NVIDIA CUDA > Apple MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
 from train_teq import LightweightTransformerEQ, OpticalDataset, SinusoidalPE, count_parameters
 from train_kan import KANTransformerEQ
 
@@ -92,8 +102,9 @@ def run_inference(model, test_loader, device):
 def test():
     import matplotlib.pyplot as plt
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Running on {device}\n")
+    device = get_device()
+    dev_desc = "NVIDIA CUDA" if device == 'cuda' else "Apple MPS" if device == 'mps' else "CPU"
+    print(f"运行设备: {device} ({dev_desc})\n")
 
     # 1. 发现可用模型
     available = []
