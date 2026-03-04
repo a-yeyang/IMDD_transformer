@@ -479,7 +479,7 @@
         <INSTANCE __key="instances" instanceId="UniversalFiberFwd_vtmg1" master="URN:VPI_LIB::TC Modules\Fibers\UniversalFiberFwd.vtmg:" resVersion="9.1" showInstanceId="False">
           <GEOMETRY __key="geom" x="53.0" y="34.0" />
           <SETTING __key="settings" exprType="standard" state="NumberOfFiberSpans" value="1" />
-          <SETTING __key="settings" exprType="standard" state="Length" unit="m" value="2000" />
+          <SETTING __key="settings" exprType="standard" state="Length" unit="m" value="5000" />
           <SETTING __key="settings" exprType="standard" state="GroupRefractiveIndex" value="1.47" />
           <SETTING __key="settings" exprType="standard" state="AttenuationDescription" value="AttenuationParameter" />
           <SETTING __key="settings" exprType="standard" state="Attenuation" unit="dB/m" value="0.2e-3" />
