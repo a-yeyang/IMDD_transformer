@@ -26,7 +26,7 @@ CONFIG = {
     'use_batchnorm': True,
     'dropout': 0.1,
     'batch_size': 256,
-    'epochs': 50,
+    'epochs': 15,
     'lr': 0.001,
     'label_scale': 3.0,
     'eval_interval': 1,

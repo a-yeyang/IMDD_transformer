@@ -22,7 +22,7 @@ LOGS_DIR.mkdir(exist_ok=True)
 CONFIG = {
     'window_size': 21,
     'sps': 2,
-    'hidden_dims': [32, 16],     # 两层隐藏层
+    'hidden_dims': [64, 32],     # 两层隐藏层
     'batch_size': 256,
     'epochs': 15,
     'lr': 0.001,
