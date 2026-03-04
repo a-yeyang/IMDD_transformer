@@ -1,0 +1,24 @@
+20:56:09 | ============================================================
+20:56:09 |   1.58-Bit Multiplier-Free KAN-Former EQ — 训练开始
+20:56:09 | ============================================================
+20:56:09 | 运行设备: cuda
+20:56:09 | 
+===== BitNet-KAN-Former 参数量统计 =====
+20:56:09 |   总参数量:     3,376
+20:56:09 |   可训练参数量: 3,376
+20:56:21 | Epoch [  1/60] Train Loss: 0.035720 | Val Loss: 0.024026 | Val BER: 7.0669e-02
+20:56:31 | Epoch [  2/60] Train Loss: 0.018156 | Val Loss: 0.010207 | Val BER: 2.9719e-02
+20:56:42 | Epoch [  3/60] Train Loss: 0.011167 | Val Loss: 0.005308 | Val BER: 1.2818e-02
+20:56:53 | Epoch [  4/60] Train Loss: 0.007887 | Val Loss: 0.004093 | Val BER: 1.0858e-02
+20:57:04 | Epoch [  5/60] Train Loss: 0.006728 | Val Loss: 0.004538 | Val BER: 1.2254e-02
+20:57:15 | Epoch [  6/60] Train Loss: 0.006080 | Val Loss: 0.005408 | Val BER: 1.4199e-02
+20:57:26 | Epoch [  7/60] Train Loss: 0.005814 | Val Loss: 0.003750 | Val BER: 7.6987e-03
+20:57:37 | Epoch [  8/60] Train Loss: 0.005556 | Val Loss: 0.004748 | Val BER: 1.2696e-02
+20:57:48 | Epoch [  9/60] Train Loss: 0.005235 | Val Loss: 0.003667 | Val BER: 8.6296e-03
+20:57:59 | Epoch [ 10/60] Train Loss: 0.004357 | Val Loss: 0.002121 | Val BER: 5.2876e-03
+20:58:11 | Epoch [ 11/60] Train Loss: 0.003619 | Val Loss: 0.001508 | Val BER: 3.6243e-03
+20:58:22 | Epoch [ 12/60] Train Loss: 0.002871 | Val Loss: 0.001845 | Val BER: 4.4941e-03
+20:58:33 | Epoch [ 13/60] Train Loss: 0.002680 | Val Loss: 0.001138 | Val BER: 2.8002e-03
+20:58:43 | Epoch [ 14/60] Train Loss: 0.002335 | Val Loss: 0.000718 | Val BER: 1.3276e-03
+20:58:54 | Epoch [ 15/60] Train Loss: 0.002349 | Val Loss: 0.000742 | Val BER: 1.4726e-03
+20:59:04 | Epoch [ 16/60] Train Loss: 0.002063 | Val Loss: 0.001504 | Val BER: 3.6777e-03

@@ -3,7 +3,7 @@
 clear; close all; clc;
 %% ----------------- 仿真/网络 超参数（保持原设定，除模型外不改） -----------------
 useGPU = true;            % 是否使用 GPU（自动检测）；若你的 MATLAB/平台 不支持 GPU，可设 false
-rngSeed = 11;          % 随机数种子（使用 Mersenne Twister）
+rngSeed = 1;          % 随机数种子（使用 Mersenne Twister）
 rng(rngSeed, 'twister');
 
 config;

@@ -1,0 +1,58 @@
+17:57:37 | ============================================================
+17:57:37 |   FCNN Equalizer — 训练开始
+17:57:37 | ============================================================
+17:57:37 | 运行设备: cuda
+17:57:37 | 配置参数: {'window_size': 21, 'sps': 2, 'hidden_dims': [64, 32], 'batch_size': 256, 'epochs': 15, 'lr': 0.001, 'label_scale': 3.0, 'eval_interval': 1, 'device': 'cuda'}
+17:57:37 | 归一化统计 (训练集): mean=-0.0008, std=1.2389
+17:57:37 | 训练信号点数: 262,144  |  训练符号数: 131,072
+17:57:37 | 测试信号点数: 262,144   |  测试符号数: 131,072
+17:57:37 | 
+===== FCNN 参数量统计 =====
+17:57:37 |   总参数量:     3,521
+17:57:37 |   可训练参数量: 3,521
+17:57:37 |   各层参数明细:
+17:57:37 |     net.0.weight: 1,344  [64, 21]
+17:57:37 |     net.0.bias: 64  [64]
+17:57:37 |     net.2.weight: 2,048  [32, 64]
+17:57:37 |     net.2.bias: 32  [32]
+17:57:37 |     net.4.weight: 32  [1, 32]
+17:57:37 |     net.4.bias: 1  [1]
+17:57:37 | ==========================
+
+17:57:41 | Epoch [  1/15] Time:   1.9s | Train Loss: 0.034335 | Val Loss: 0.005435 | Val BER: 0.0000e+00 | LR: 9.89e-04
+17:57:41 |   ★ 最优模型已更新 → Epoch 1, Val Loss=0.005435, Val BER=0.0000e+00
+17:57:44 | Epoch [  2/15] Time:   1.8s | Train Loss: 0.004829 | Val Loss: 0.004332 | Val BER: 0.0000e+00 | LR: 9.57e-04
+17:57:44 |   ★ 最优模型已更新 → Epoch 2, Val Loss=0.004332, Val BER=0.0000e+00
+17:57:47 | Epoch [  3/15] Time:   1.8s | Train Loss: 0.004059 | Val Loss: 0.003987 | Val BER: 0.0000e+00 | LR: 9.05e-04
+17:57:47 |   ★ 最优模型已更新 → Epoch 3, Val Loss=0.003987, Val BER=0.0000e+00
+17:57:50 | Epoch [  4/15] Time:   1.8s | Train Loss: 0.003536 | Val Loss: 0.003300 | Val BER: 0.0000e+00 | LR: 8.36e-04
+17:57:50 |   ★ 最优模型已更新 → Epoch 4, Val Loss=0.003300, Val BER=0.0000e+00
+17:57:53 | Epoch [  5/15] Time:   1.8s | Train Loss: 0.003157 | Val Loss: 0.002944 | Val BER: 0.0000e+00 | LR: 7.52e-04
+17:57:53 |   ★ 最优模型已更新 → Epoch 5, Val Loss=0.002944, Val BER=0.0000e+00
+17:57:56 | Epoch [  6/15] Time:   1.7s | Train Loss: 0.002870 | Val Loss: 0.002793 | Val BER: 0.0000e+00 | LR: 6.58e-04
+17:57:56 |   ★ 最优模型已更新 → Epoch 6, Val Loss=0.002793, Val BER=0.0000e+00
+17:58:00 | Epoch [  7/15] Time:   1.7s | Train Loss: 0.002681 | Val Loss: 0.002595 | Val BER: 0.0000e+00 | LR: 5.57e-04
+17:58:00 |   ★ 最优模型已更新 → Epoch 7, Val Loss=0.002595, Val BER=0.0000e+00
+17:58:03 | Epoch [  8/15] Time:   1.8s | Train Loss: 0.002530 | Val Loss: 0.002491 | Val BER: 0.0000e+00 | LR: 4.53e-04
+17:58:03 |   ★ 最优模型已更新 → Epoch 8, Val Loss=0.002491, Val BER=0.0000e+00
+17:58:06 | Epoch [  9/15] Time:   1.7s | Train Loss: 0.002418 | Val Loss: 0.002501 | Val BER: 0.0000e+00 | LR: 3.52e-04
+17:58:09 | Epoch [ 10/15] Time:   1.7s | Train Loss: 0.002317 | Val Loss: 0.002288 | Val BER: 0.0000e+00 | LR: 2.58e-04
+17:58:09 |   ★ 最优模型已更新 → Epoch 10, Val Loss=0.002288, Val BER=0.0000e+00
+17:58:12 | Epoch [ 11/15] Time:   1.7s | Train Loss: 0.002246 | Val Loss: 0.002241 | Val BER: 0.0000e+00 | LR: 1.74e-04
+17:58:12 |   ★ 最优模型已更新 → Epoch 11, Val Loss=0.002241, Val BER=0.0000e+00
+17:58:15 | Epoch [ 12/15] Time:   1.8s | Train Loss: 0.002184 | Val Loss: 0.002196 | Val BER: 0.0000e+00 | LR: 1.05e-04
+17:58:15 |   ★ 最优模型已更新 → Epoch 12, Val Loss=0.002196, Val BER=0.0000e+00
+17:58:18 | Epoch [ 13/15] Time:   1.7s | Train Loss: 0.002145 | Val Loss: 0.002172 | Val BER: 0.0000e+00 | LR: 5.28e-05
+17:58:18 |   ★ 最优模型已更新 → Epoch 13, Val Loss=0.002172, Val BER=0.0000e+00
+17:58:22 | Epoch [ 14/15] Time:   1.8s | Train Loss: 0.002114 | Val Loss: 0.002134 | Val BER: 0.0000e+00 | LR: 2.08e-05
+17:58:22 |   ★ 最优模型已更新 → Epoch 14, Val Loss=0.002134, Val BER=0.0000e+00
+17:58:25 | Epoch [ 15/15] Time:   1.7s | Train Loss: 0.002099 | Val Loss: 0.002125 | Val BER: 0.0000e+00 | LR: 1.00e-05
+17:58:25 |   ★ 最优模型已更新 → Epoch 15, Val Loss=0.002125, Val BER=0.0000e+00
+17:58:25 | 
+============================================================
+17:58:25 | 训练完成！最优 Epoch: 15
+17:58:25 | 最优验证损失: 0.002125
+17:58:25 | 最优验证 BER:  0.0000e+00
+17:58:25 | 模型已保存至:  D:\IMDD_transformer\models\fcnn_model.pth
+17:58:25 | ============================================================
+17:58:25 | 训练曲线已保存: D:\IMDD_transformer\images\fcnn_training_loss.png

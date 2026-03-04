@@ -1,0 +1,53 @@
+16:42:38 | ============================================================
+16:42:38 |   FCNN Equalizer — 训练开始
+16:42:38 | ============================================================
+16:42:38 | 运行设备: cuda
+16:42:38 | 配置参数: {'window_size': 21, 'sps': 2, 'hidden_dims': [32, 16], 'batch_size': 256, 'epochs': 50, 'lr': 0.001, 'label_scale': 3.0, 'eval_interval': 1, 'device': 'cuda'}
+16:42:38 | 归一化统计 (训练集): mean=-0.0008, std=1.2389
+16:42:38 | 训练信号点数: 262,144  |  训练符号数: 131,072
+16:42:38 | 测试信号点数: 262,144   |  测试符号数: 131,072
+16:42:38 | 
+===== FCNN 参数量统计 =====
+16:42:38 |   总参数量:     1,249
+16:42:38 |   可训练参数量: 1,249
+16:42:38 |   各层参数明细:
+16:42:38 |     net.0.weight: 672  [32, 21]
+16:42:38 |     net.0.bias: 32  [32]
+16:42:38 |     net.2.weight: 512  [16, 32]
+16:42:38 |     net.2.bias: 16  [16]
+16:42:38 |     net.4.weight: 16  [1, 16]
+16:42:38 |     net.4.bias: 1  [1]
+16:42:38 | ==========================
+
+16:42:43 | Epoch [  1/50] Time:   2.5s | Train Loss: 0.057113 | Val Loss: 0.007336 | Val BER: 1.8312e-04 | LR: 9.99e-04
+16:42:43 |   ★ 最优模型已更新 → Epoch 1, Val Loss=0.007336, Val BER=1.8312e-04
+16:42:46 | Epoch [  2/50] Time:   1.9s | Train Loss: 0.005581 | Val Loss: 0.004770 | Val BER: 7.6300e-06 | LR: 9.96e-04
+16:42:46 |   ★ 最优模型已更新 → Epoch 2, Val Loss=0.004770, Val BER=7.6300e-06
+16:42:50 | Epoch [  3/50] Time:   2.0s | Train Loss: 0.004483 | Val Loss: 0.004188 | Val BER: 7.6300e-06 | LR: 9.91e-04
+16:42:50 |   ★ 最优模型已更新 → Epoch 3, Val Loss=0.004188, Val BER=7.6300e-06
+16:42:54 | Epoch [  4/50] Time:   2.1s | Train Loss: 0.003956 | Val Loss: 0.003850 | Val BER: 0.0000e+00 | LR: 9.84e-04
+16:42:54 |   ★ 最优模型已更新 → Epoch 4, Val Loss=0.003850, Val BER=0.0000e+00
+16:42:57 | Epoch [  5/50] Time:   2.0s | Train Loss: 0.003583 | Val Loss: 0.003385 | Val BER: 0.0000e+00 | LR: 9.76e-04
+16:42:57 |   ★ 最优模型已更新 → Epoch 5, Val Loss=0.003385, Val BER=0.0000e+00
+16:43:01 | Epoch [  6/50] Time:   1.9s | Train Loss: 0.003297 | Val Loss: 0.003265 | Val BER: 0.0000e+00 | LR: 9.65e-04
+16:43:01 |   ★ 最优模型已更新 → Epoch 6, Val Loss=0.003265, Val BER=0.0000e+00
+16:43:04 | Epoch [  7/50] Time:   1.8s | Train Loss: 0.003056 | Val Loss: 0.002988 | Val BER: 0.0000e+00 | LR: 9.53e-04
+16:43:04 |   ★ 最优模型已更新 → Epoch 7, Val Loss=0.002988, Val BER=0.0000e+00
+16:43:07 | Epoch [  8/50] Time:   1.9s | Train Loss: 0.002869 | Val Loss: 0.002745 | Val BER: 0.0000e+00 | LR: 9.39e-04
+16:43:07 |   ★ 最优模型已更新 → Epoch 8, Val Loss=0.002745, Val BER=0.0000e+00
+16:43:11 | Epoch [  9/50] Time:   1.9s | Train Loss: 0.002681 | Val Loss: 0.002730 | Val BER: 0.0000e+00 | LR: 9.23e-04
+16:43:11 |   ★ 最优模型已更新 → Epoch 9, Val Loss=0.002730, Val BER=0.0000e+00
+16:43:14 | Epoch [ 10/50] Time:   1.8s | Train Loss: 0.002572 | Val Loss: 0.002518 | Val BER: 0.0000e+00 | LR: 9.05e-04
+16:43:14 |   ★ 最优模型已更新 → Epoch 10, Val Loss=0.002518, Val BER=0.0000e+00
+16:43:17 | Epoch [ 11/50] Time:   1.9s | Train Loss: 0.002476 | Val Loss: 0.002447 | Val BER: 0.0000e+00 | LR: 8.86e-04
+16:43:17 |   ★ 最优模型已更新 → Epoch 11, Val Loss=0.002447, Val BER=0.0000e+00
+16:43:21 | Epoch [ 12/50] Time:   1.9s | Train Loss: 0.002387 | Val Loss: 0.002344 | Val BER: 0.0000e+00 | LR: 8.66e-04
+16:43:21 |   ★ 最优模型已更新 → Epoch 12, Val Loss=0.002344, Val BER=0.0000e+00
+16:43:24 | Epoch [ 13/50] Time:   1.9s | Train Loss: 0.002318 | Val Loss: 0.002337 | Val BER: 0.0000e+00 | LR: 8.44e-04
+16:43:24 |   ★ 最优模型已更新 → Epoch 13, Val Loss=0.002337, Val BER=0.0000e+00
+16:43:27 | Epoch [ 14/50] Time:   1.9s | Train Loss: 0.002223 | Val Loss: 0.002150 | Val BER: 7.6300e-06 | LR: 8.21e-04
+16:43:27 |   ★ 最优模型已更新 → Epoch 14, Val Loss=0.002150, Val BER=7.6300e-06
+16:43:31 | Epoch [ 15/50] Time:   1.8s | Train Loss: 0.002154 | Val Loss: 0.002109 | Val BER: 0.0000e+00 | LR: 7.96e-04
+16:43:31 |   ★ 最优模型已更新 → Epoch 15, Val Loss=0.002109, Val BER=0.0000e+00
+16:43:34 | Epoch [ 16/50] Time:   1.9s | Train Loss: 0.002091 | Val Loss: 0.002039 | Val BER: 0.0000e+00 | LR: 7.70e-04
+16:43:34 |   ★ 最优模型已更新 → Epoch 16, Val Loss=0.002039, Val BER=0.0000e+00

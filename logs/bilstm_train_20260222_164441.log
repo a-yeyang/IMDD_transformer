@@ -1,0 +1,35 @@
+16:44:41 | ============================================================
+16:44:41 |   BiLSTM Equalizer — 训练开始
+16:44:41 | ============================================================
+16:44:41 | 运行设备: cuda
+16:44:41 | 配置参数: {'window_size': 21, 'sps': 2, 'hidden_size': 16, 'num_lstm_layers': 1, 'use_center': True, 'batch_size': 256, 'epochs': 50, 'lr': 0.001, 'label_scale': 3.0, 'eval_interval': 1, 'device': 'cuda'}
+16:44:41 | 归一化统计 (训练集): mean=-0.0008, std=1.2389
+16:44:41 | 训练信号点数: 262,144  |  训练符号数: 131,072
+16:44:41 | 测试信号点数: 262,144   |  测试符号数: 131,072
+16:44:41 | 
+===== BiLSTM 参数量统计 =====
+16:44:41 |   总参数量:     2,977
+16:44:41 |   可训练参数量: 2,977
+16:44:41 |   各层参数明细:
+16:44:41 |     lstm.weight_ih_l0: 64  [64, 1]
+16:44:41 |     lstm.weight_hh_l0: 1,024  [64, 16]
+16:44:41 |     lstm.bias_ih_l0: 64  [64]
+16:44:41 |     lstm.bias_hh_l0: 64  [64]
+16:44:41 |     lstm.weight_ih_l0_reverse: 64  [64, 1]
+16:44:41 |     lstm.weight_hh_l0_reverse: 1,024  [64, 16]
+16:44:41 |     lstm.bias_ih_l0_reverse: 64  [64]
+16:44:41 |     lstm.bias_hh_l0_reverse: 64  [64]
+16:44:41 |     head.0.weight: 512  [16, 32]
+16:44:41 |     head.0.bias: 16  [16]
+16:44:41 |     head.2.weight: 16  [1, 16]
+16:44:41 |     head.2.bias: 1  [1]
+16:44:41 | ==========================
+
+16:44:46 | Epoch [  1/50] Time:   2.6s | Train Loss: 0.065449 | Val Loss: 0.009348 | Val BER: 2.0296e-03 | LR: 9.99e-04
+16:44:46 |   ★ 最优模型已更新 → Epoch 1, Val Loss=0.009348, Val BER=2.0296e-03
+16:44:50 | Epoch [  2/50] Time:   2.3s | Train Loss: 0.006519 | Val Loss: 0.004504 | Val BER: 1.5260e-05 | LR: 9.96e-04
+16:44:50 |   ★ 最优模型已更新 → Epoch 2, Val Loss=0.004504, Val BER=1.5260e-05
+16:44:54 | Epoch [  3/50] Time:   2.3s | Train Loss: 0.003718 | Val Loss: 0.003367 | Val BER: 0.0000e+00 | LR: 9.91e-04
+16:44:54 |   ★ 最优模型已更新 → Epoch 3, Val Loss=0.003367, Val BER=0.0000e+00
+16:44:58 | Epoch [  4/50] Time:   2.3s | Train Loss: 0.002845 | Val Loss: 0.002761 | Val BER: 0.0000e+00 | LR: 9.84e-04
+16:44:58 |   ★ 最优模型已更新 → Epoch 4, Val Loss=0.002761, Val BER=0.0000e+00

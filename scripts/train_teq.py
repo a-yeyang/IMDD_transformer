@@ -20,7 +20,19 @@ MODELS_DIR.mkdir(exist_ok=True)
 IMAGES_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
+
+# ================= 环境识别：自动选择计算设备 =================
+def get_device():
+    """自动识别：NVIDIA CUDA > Apple MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return 'mps'
+    return 'cpu'
+
+
 # ================= 配置参数 =================
+FORCE_CPU = False   # True: 强制使用 CPU 训练；False: 自动识别设备 (CUDA/MPS/CPU)
 CONFIG = {
     'window_size': 21,       # 输入滑窗大小 (采样点数)
     'sps': 2,                # 每个符号的采样点数 (需与Matlab一致)
@@ -37,7 +49,8 @@ CONFIG = {
     'lr': 0.001,
     'label_scale': 3.0,
     'eval_interval': 1,      # 每隔多少 epoch 做一次测试集评估
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+    'force_cpu': FORCE_CPU,
+    'device': 'cpu' if FORCE_CPU else get_device()
 }
 
 
@@ -208,7 +221,9 @@ def train():
     log.info("=" * 60)
     log.info("  Lightweight Transformer Equalizer — 训练开始")
     log.info("=" * 60)
-    log.info(f"运行设备: {CONFIG['device']}")
+    dev = CONFIG['device']
+    log.info(f"运行设备: {dev} (NVIDIA CUDA)" if dev == 'cuda' else
+             f"运行设备: {dev} (Apple MPS)" if dev == 'mps' else f"运行设备: {dev} (CPU)")
     log.info(f"配置参数: {CONFIG}")
 
     # ---------- 数据加载 ----------

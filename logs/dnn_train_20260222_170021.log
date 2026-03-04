@@ -1,0 +1,66 @@
+17:00:21 | ============================================================
+17:00:21 |   DNN Equalizer — 训练开始
+17:00:21 | ============================================================
+17:00:21 | 运行设备: cuda
+17:00:21 | 配置参数: {'window_size': 21, 'sps': 2, 'hidden_dims': [64, 32, 16], 'use_batchnorm': True, 'dropout': 0.1, 'batch_size': 256, 'epochs': 15, 'lr': 0.001, 'label_scale': 3.0, 'eval_interval': 1, 'device': 'cuda'}
+17:00:21 | 归一化统计 (训练集): mean=-0.0008, std=1.2389
+17:00:21 | 训练信号点数: 262,144  |  训练符号数: 131,072
+17:00:21 | 测试信号点数: 262,144   |  测试符号数: 131,072
+17:00:21 | 
+===== DNN 参数量统计 =====
+17:00:21 |   总参数量:     4,257
+17:00:21 |   可训练参数量: 4,257
+17:00:21 |   各层参数明细:
+17:00:21 |     net.0.weight: 1,344  [64, 21]
+17:00:21 |     net.0.bias: 64  [64]
+17:00:21 |     net.1.weight: 64  [64]
+17:00:21 |     net.1.bias: 64  [64]
+17:00:21 |     net.4.weight: 2,048  [32, 64]
+17:00:21 |     net.4.bias: 32  [32]
+17:00:21 |     net.5.weight: 32  [32]
+17:00:21 |     net.5.bias: 32  [32]
+17:00:21 |     net.8.weight: 512  [16, 32]
+17:00:21 |     net.8.bias: 16  [16]
+17:00:21 |     net.9.weight: 16  [16]
+17:00:21 |     net.9.bias: 16  [16]
+17:00:21 |     net.12.weight: 16  [1, 16]
+17:00:21 |     net.12.bias: 1  [1]
+17:00:21 | ==========================
+
+17:00:26 | Epoch [  1/15] Time:   2.7s | Train Loss: 0.069266 | Val Loss: 0.011804 | Val BER: 6.2566e-04 | LR: 9.89e-04
+17:00:26 |   ★ 最优模型已更新 → Epoch 1, Val Loss=0.011804, Val BER=6.2566e-04
+17:00:30 | Epoch [  2/15] Time:   2.3s | Train Loss: 0.029142 | Val Loss: 0.007160 | Val BER: 3.0520e-05 | LR: 9.57e-04
+17:00:30 |   ★ 最优模型已更新 → Epoch 2, Val Loss=0.007160, Val BER=3.0520e-05
+17:00:35 | Epoch [  3/15] Time:   2.6s | Train Loss: 0.024373 | Val Loss: 0.005523 | Val BER: 1.5260e-05 | LR: 9.05e-04
+17:00:35 |   ★ 最优模型已更新 → Epoch 3, Val Loss=0.005523, Val BER=1.5260e-05
+17:00:39 | Epoch [  4/15] Time:   2.6s | Train Loss: 0.021300 | Val Loss: 0.004990 | Val BER: 2.2890e-05 | LR: 8.36e-04
+17:00:39 |   ★ 最优模型已更新 → Epoch 4, Val Loss=0.004990, Val BER=2.2890e-05
+17:00:44 | Epoch [  5/15] Time:   2.6s | Train Loss: 0.019643 | Val Loss: 0.003459 | Val BER: 1.5260e-05 | LR: 7.52e-04
+17:00:44 |   ★ 最优模型已更新 → Epoch 5, Val Loss=0.003459, Val BER=1.5260e-05
+17:00:48 | Epoch [  6/15] Time:   2.5s | Train Loss: 0.017653 | Val Loss: 0.002969 | Val BER: 7.6300e-06 | LR: 6.58e-04
+17:00:48 |   ★ 最优模型已更新 → Epoch 6, Val Loss=0.002969, Val BER=7.6300e-06
+17:00:53 | Epoch [  7/15] Time:   2.6s | Train Loss: 0.016802 | Val Loss: 0.002282 | Val BER: 1.5260e-05 | LR: 5.57e-04
+17:00:53 |   ★ 最优模型已更新 → Epoch 7, Val Loss=0.002282, Val BER=1.5260e-05
+17:00:57 | Epoch [  8/15] Time:   2.7s | Train Loss: 0.015533 | Val Loss: 0.001326 | Val BER: 2.2890e-05 | LR: 4.53e-04
+17:00:57 |   ★ 最优模型已更新 → Epoch 8, Val Loss=0.001326, Val BER=2.2890e-05
+17:01:02 | Epoch [  9/15] Time:   2.6s | Train Loss: 0.014617 | Val Loss: 0.001139 | Val BER: 5.3410e-05 | LR: 3.52e-04
+17:01:02 |   ★ 最优模型已更新 → Epoch 9, Val Loss=0.001139, Val BER=5.3410e-05
+17:01:07 | Epoch [ 10/15] Time:   2.6s | Train Loss: 0.013822 | Val Loss: 0.001018 | Val BER: 1.5260e-05 | LR: 2.58e-04
+17:01:07 |   ★ 最优模型已更新 → Epoch 10, Val Loss=0.001018, Val BER=1.5260e-05
+17:01:11 | Epoch [ 11/15] Time:   2.7s | Train Loss: 0.013422 | Val Loss: 0.001105 | Val BER: 1.5260e-05 | LR: 1.74e-04
+17:01:16 | Epoch [ 12/15] Time:   2.7s | Train Loss: 0.013318 | Val Loss: 0.000897 | Val BER: 7.6300e-06 | LR: 1.05e-04
+17:01:16 |   ★ 最优模型已更新 → Epoch 12, Val Loss=0.000897, Val BER=7.6300e-06
+17:01:21 | Epoch [ 13/15] Time:   2.8s | Train Loss: 0.013529 | Val Loss: 0.000888 | Val BER: 7.6300e-06 | LR: 5.28e-05
+17:01:21 |   ★ 最优模型已更新 → Epoch 13, Val Loss=0.000888, Val BER=7.6300e-06
+17:01:25 | Epoch [ 14/15] Time:   2.8s | Train Loss: 0.012983 | Val Loss: 0.000688 | Val BER: 2.2890e-05 | LR: 2.08e-05
+17:01:25 |   ★ 最优模型已更新 → Epoch 14, Val Loss=0.000688, Val BER=2.2890e-05
+17:01:30 | Epoch [ 15/15] Time:   2.9s | Train Loss: 0.013149 | Val Loss: 0.000632 | Val BER: 1.5260e-05 | LR: 1.00e-05
+17:01:30 |   ★ 最优模型已更新 → Epoch 15, Val Loss=0.000632, Val BER=1.5260e-05
+17:01:30 | 
+============================================================
+17:01:30 | 训练完成！最优 Epoch: 15
+17:01:30 | 最优验证损失: 0.000632
+17:01:30 | 最优验证 BER:  1.5260e-05
+17:01:30 | 模型已保存至:  D:\IMDD_transformer\models\dnn_model.pth
+17:01:30 | ============================================================
+17:01:31 | 训练曲线已保存: D:\IMDD_transformer\images\dnn_training_loss.png

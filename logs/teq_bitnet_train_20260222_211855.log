@@ -1,0 +1,80 @@
+21:18:55 | ============================================================
+21:18:55 |   BitNet b1.58 Transformer Equalizer — 训练开始
+21:18:55 | ============================================================
+21:18:55 | 运行设备: cuda
+21:18:55 | 配置参数: {'window_size': 21, 'sps': 2, 'd_model': 16, 'nhead': 2, 'dim_feedforward': 32, 'num_layers': 1, 'num_passes': 2, 'use_weight_sharing': True, 'use_center_token': True, 'use_sinusoidal_pe': True, 'batch_size': 256, 'epochs': 50, 'lr': 0.001, 'label_scale': 3.0, 'eval_interval': 1, 'device': 'cuda'}
+21:18:55 | 归一化统计 (训练集): mean=-0.0008, std=1.2389
+21:18:55 | 训练信号点数: 262,144  |  训练符号数: 131,072
+21:18:55 | 测试信号点数: 262,144   |  测试符号数: 131,072
+21:18:55 | 
+===== BitNet Transformer 参数量统计 =====
+21:18:55 |   总参数量:     2,435
+21:18:55 |   可训练参数量: 2,435
+21:18:55 |   各层参数明细:
+21:18:55 |     input_proj.weight: 16  [16, 1]
+21:18:55 |     input_proj.bias: 16  [16]
+21:18:55 |     input_proj.norm.weight: 1  [1]
+21:18:55 |     input_proj.norm.bias: 1  [1]
+21:18:55 |     shared_layer.qkv_proj.weight: 768  [48, 16]
+21:18:55 |     shared_layer.qkv_proj.bias: 48  [48]
+21:18:55 |     shared_layer.qkv_proj.norm.weight: 16  [16]
+21:18:55 |     shared_layer.qkv_proj.norm.bias: 16  [16]
+21:18:55 |     shared_layer.out_proj.weight: 256  [16, 16]
+21:18:55 |     shared_layer.out_proj.bias: 16  [16]
+21:18:55 |     shared_layer.out_proj.norm.weight: 16  [16]
+21:18:55 |     shared_layer.out_proj.norm.bias: 16  [16]
+21:18:55 |     shared_layer.linear1.weight: 512  [32, 16]
+21:18:55 |     shared_layer.linear1.bias: 32  [32]
+21:18:55 |     shared_layer.linear1.norm.weight: 16  [16]
+21:18:55 |     shared_layer.linear1.norm.bias: 16  [16]
+21:18:55 |     shared_layer.linear2.weight: 512  [16, 32]
+21:18:55 |     shared_layer.linear2.bias: 16  [16]
+21:18:55 |     shared_layer.linear2.norm.weight: 32  [32]
+21:18:55 |     shared_layer.linear2.norm.bias: 32  [32]
+21:18:55 |     shared_layer.norm1.weight: 16  [16]
+21:18:55 |     shared_layer.norm1.bias: 16  [16]
+21:18:55 |     shared_layer.norm2.weight: 16  [16]
+21:18:55 |     shared_layer.norm2.bias: 16  [16]
+21:18:55 |     head.weight: 16  [1, 16]
+21:18:55 |     head.bias: 1  [1]
+21:18:55 | ==========================
+
+21:19:04 | Epoch [  1/50] Time:   5.6s | Train Loss: 0.566916 | Val Loss: 0.557996 | Val BER: 7.5188e-01 | LR: 9.99e-04
+21:19:04 |   ★ 最优模型已更新 → Epoch 1, Val Loss=0.557996, Val BER=7.5188e-01
+21:19:12 | Epoch [  2/50] Time:   5.2s | Train Loss: 0.556713 | Val Loss: 0.558690 | Val BER: 7.5188e-01 | LR: 9.96e-04
+21:19:20 | Epoch [  3/50] Time:   5.2s | Train Loss: 0.556193 | Val Loss: 0.557267 | Val BER: 7.5188e-01 | LR: 9.91e-04
+21:19:20 |   ★ 最优模型已更新 → Epoch 3, Val Loss=0.557267, Val BER=7.5188e-01
+21:19:27 | Epoch [  4/50] Time:   5.1s | Train Loss: 0.555198 | Val Loss: 0.557939 | Val BER: 7.5188e-01 | LR: 9.84e-04
+21:19:35 | Epoch [  5/50] Time:   5.1s | Train Loss: 0.555106 | Val Loss: 0.557550 | Val BER: 7.5188e-01 | LR: 9.76e-04
+21:19:43 | Epoch [  6/50] Time:   5.0s | Train Loss: 0.554941 | Val Loss: 0.557159 | Val BER: 7.4987e-01 | LR: 9.65e-04
+21:19:43 |   ★ 最优模型已更新 → Epoch 6, Val Loss=0.557159, Val BER=7.4987e-01
+21:19:50 | Epoch [  7/50] Time:   5.2s | Train Loss: 0.554844 | Val Loss: 0.557126 | Val BER: 7.5188e-01 | LR: 9.53e-04
+21:19:50 |   ★ 最优模型已更新 → Epoch 7, Val Loss=0.557126, Val BER=7.5188e-01
+21:19:58 | Epoch [  8/50] Time:   5.1s | Train Loss: 0.554631 | Val Loss: 0.557196 | Val BER: 7.5188e-01 | LR: 9.39e-04
+21:20:06 | Epoch [  9/50] Time:   5.1s | Train Loss: 0.554798 | Val Loss: 0.557548 | Val BER: 7.4987e-01 | LR: 9.23e-04
+21:20:14 | Epoch [ 10/50] Time:   5.0s | Train Loss: 0.554612 | Val Loss: 0.557483 | Val BER: 7.5188e-01 | LR: 9.05e-04
+21:20:21 | Epoch [ 11/50] Time:   5.1s | Train Loss: 0.554645 | Val Loss: 0.557114 | Val BER: 7.5188e-01 | LR: 8.86e-04
+21:20:21 |   ★ 最优模型已更新 → Epoch 11, Val Loss=0.557114, Val BER=7.5188e-01
+21:20:29 | Epoch [ 12/50] Time:   5.2s | Train Loss: 0.554723 | Val Loss: 0.557122 | Val BER: 7.5188e-01 | LR: 8.66e-04
+21:20:37 | Epoch [ 13/50] Time:   5.2s | Train Loss: 0.554625 | Val Loss: 0.557471 | Val BER: 7.5188e-01 | LR: 8.44e-04
+21:20:44 | Epoch [ 14/50] Time:   5.2s | Train Loss: 0.554570 | Val Loss: 0.557217 | Val BER: 7.5188e-01 | LR: 8.21e-04
+21:20:52 | Epoch [ 15/50] Time:   5.0s | Train Loss: 0.554583 | Val Loss: 0.557516 | Val BER: 7.5188e-01 | LR: 7.96e-04
+21:21:00 | Epoch [ 16/50] Time:   5.1s | Train Loss: 0.554556 | Val Loss: 0.557142 | Val BER: 7.4987e-01 | LR: 7.70e-04
+21:21:07 | Epoch [ 17/50] Time:   5.2s | Train Loss: 0.554587 | Val Loss: 0.557618 | Val BER: 7.5188e-01 | LR: 7.43e-04
+21:21:15 | Epoch [ 18/50] Time:   5.2s | Train Loss: 0.554571 | Val Loss: 0.557114 | Val BER: 7.5188e-01 | LR: 7.16e-04
+21:21:23 | Epoch [ 19/50] Time:   5.1s | Train Loss: 0.554547 | Val Loss: 0.557115 | Val BER: 7.5188e-01 | LR: 6.87e-04
+21:21:30 | Epoch [ 20/50] Time:   5.1s | Train Loss: 0.554520 | Val Loss: 0.557245 | Val BER: 7.5188e-01 | LR: 6.58e-04
+21:21:38 | Epoch [ 21/50] Time:   5.2s | Train Loss: 0.554558 | Val Loss: 0.557148 | Val BER: 7.5188e-01 | LR: 6.28e-04
+21:21:46 | Epoch [ 22/50] Time:   5.2s | Train Loss: 0.554499 | Val Loss: 0.557129 | Val BER: 7.4987e-01 | LR: 5.98e-04
+21:21:53 | Epoch [ 23/50] Time:   5.1s | Train Loss: 0.554477 | Val Loss: 0.557637 | Val BER: 7.5188e-01 | LR: 5.67e-04
+21:22:01 | Epoch [ 24/50] Time:   5.1s | Train Loss: 0.554545 | Val Loss: 0.557260 | Val BER: 7.5188e-01 | LR: 5.36e-04
+21:22:09 | Epoch [ 25/50] Time:   5.2s | Train Loss: 0.554458 | Val Loss: 0.557207 | Val BER: 7.5188e-01 | LR: 5.05e-04
+21:22:16 | Epoch [ 26/50] Time:   5.1s | Train Loss: 0.554426 | Val Loss: 0.557329 | Val BER: 7.5188e-01 | LR: 4.74e-04
+21:22:24 | Epoch [ 27/50] Time:   5.2s | Train Loss: 0.554442 | Val Loss: 0.557116 | Val BER: 7.4987e-01 | LR: 4.43e-04
+21:22:32 | Epoch [ 28/50] Time:   5.1s | Train Loss: 0.554441 | Val Loss: 0.557131 | Val BER: 7.5188e-01 | LR: 4.12e-04
+21:22:39 | Epoch [ 29/50] Time:   5.3s | Train Loss: 0.554462 | Val Loss: 0.557187 | Val BER: 7.5188e-01 | LR: 3.82e-04
+21:22:47 | Epoch [ 30/50] Time:   5.1s | Train Loss: 0.554456 | Val Loss: 0.557166 | Val BER: 7.5188e-01 | LR: 3.52e-04
+21:22:54 | Epoch [ 31/50] Time:   4.9s | Train Loss: 0.554449 | Val Loss: 0.557115 | Val BER: 7.4987e-01 | LR: 3.23e-04
+21:23:01 | Epoch [ 32/50] Time:   5.3s | Train Loss: 0.554382 | Val Loss: 0.557116 | Val BER: 7.5188e-01 | LR: 2.94e-04
+21:23:10 | Epoch [ 33/50] Time:   5.5s | Train Loss: 0.554425 | Val Loss: 0.557183 | Val BER: 7.4987e-01 | LR: 2.67e-04
+21:23:17 | Epoch [ 34/50] Time:   5.2s | Train Loss: 0.554409 | Val Loss: 0.557199 | Val BER: 7.4987e-01 | LR: 2.40e-04

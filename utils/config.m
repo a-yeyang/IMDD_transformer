@@ -7,14 +7,12 @@ GBt=Rs;
 UXR=256;
 
 
-
 SSMF_length = 2;
 TX_k=1;
 laser_driver_amp=0.5;
 Fs=120; 
 Rs=60;
 UXR=256;
-
 
 
 % bandwidth: 期望的3dB带宽（单位：GHz）
