@@ -59,7 +59,7 @@ from train_dnn import (
 )
 
 # ================= 全局配置 =================
-SNR_LIST    = [0, 5, 10, 15, 20, None]
+SNR_LIST    = [0, 5, 10, 15, 20,25, None]
 MAX_WORKERS = 4
 LABEL_SCALE = 3.0
 BATCH_SIZE  = 1024
