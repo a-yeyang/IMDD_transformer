@@ -8,10 +8,10 @@ KAN 均衡器变体 — 训练脚本
   方案 2: Hybrid-KAN — FCNN 前端线性特征提取 + KAN 后端非线性映射
   方案 3: ResKAN     — FCNN 主路径 + KAN 残差校正分支
 
-核心假设：
-  IM/DD 信道的非线性主要来自方检波 (|·|²)。KAN 的可学习样条激活函数
-  擅长拟合单变量非线性函数，若放置在正确的位置（前馈结构而非递归结构），
-  可能比 ReLU 更精确地学习方检波的逆映射。
+参数量对齐机制 (MATCH_PARAMS 开关):
+  打开后，各模型自动微调隐层维度使总参数量对齐到 FCNN 基准。
+  用户只需修改 BASE 中的基本参数 (window_size, fcnn_hidden_dims,
+  grid_size, spline_order)，各模型的内部维度会自动跟随调整。
 
 运行方式:
   python train_kan_ideas.py             # 顺序训练全部 3 个模型
@@ -52,6 +52,179 @@ def get_device():
     return 'cpu'
 
 
+# ╔═══════════════════════════════════════════════════════════╗
+# ║                  参数量对齐开关 & 基准配置                    ║
+# ╚═══════════════════════════════════════════════════════════╝
+#
+# MATCH_PARAMS = True  时：
+#   1. 以 FCNN(BASE['fcnn_hidden_dims']) 的参数量为对齐目标
+#   2. 各模型自动搜索 hidden_dims 使总参数量 ≈ 目标
+#   3. 修改 BASE 中任何参数后，所有模型自动重新微调
+#
+# MATCH_PARAMS = False 时：
+#   使用各模型手动指定的默认隐层维度
+
+MATCH_PARAMS = True
+
+BASE = {
+    'window_size':      21,
+    'sps':              2,
+    'fcnn_hidden_dims': [64, 32],   # ← FCNN 基准隐层，决定目标参数量
+    'grid_size':        5,          # ← B-样条网格区间数
+    'spline_order':     3,          # ← 样条阶数
+    'grid_range':       (-2.0, 2.0),
+    'batch_size':       256,
+    'lr':               0.001,
+    'label_scale':      3.0,
+    'eval_interval':    1,
+}
+
+
+# ================= 参数量计算工具 =================
+
+def _fcnn_param_count(input_dim, hidden_dims):
+    """FCNN (Linear+bias 逐层) 的精确参数量"""
+    total, d = 0, input_dim
+    for h in hidden_dims:
+        total += d * h + h          # Linear(d, h) + bias
+        d = h
+    total += d + 1                  # 输出层 Linear(d, 1) + bias
+    return total
+
+
+def _kan_factor():
+    """每条 KANLinear 连接的参数数 = grid_size + spline_order + 1"""
+    return BASE['grid_size'] + BASE['spline_order'] + 1
+
+
+# ================= 自动微调搜索 =================
+
+def _tune_kan_fcnn(target, W, F):
+    """
+    搜索 KAN-FCNN 的 [h1, h2] 使参数量最接近 target。
+
+    参数公式:
+      KANLinear(W, h1)  : W·h1·F
+      LayerNorm(h1)     : 2·h1
+      KANLinear(h1, h2) : h1·h2·F
+      LayerNorm(h2)     : 2·h2
+      KANLinear(h2, 1)  : h2·F
+      ──────────────────────────
+      Total = F·(W·h1 + h1·h2 + h2) + 2·(h1 + h2)
+    """
+    best, best_diff = [16, 8], float('inf')
+    for h1 in range(2, 128):
+        for h2 in range(1, h1 + 1):
+            t = F * (W * h1 + h1 * h2 + h2) + 2 * (h1 + h2)
+            d = abs(t - target)
+            if d < best_diff:
+                best_diff = d
+                best = [h1, h2]
+    return best
+
+
+def _tune_hybrid_kan(target, W, F):
+    """
+    搜索 Hybrid-KAN 的 [h1, h2] 使参数量最接近 target。
+
+    参数公式:
+      Linear(W, h1)+bias  : W·h1 + h1
+      Linear(h1, h2)+bias : h1·h2 + h2
+      KANLinear(h2, 1)    : h2·F
+      ──────────────────────────
+      Total = h1·(W+1) + h2·(h1+1) + h2·F
+            = h1·(W+1) + h2·(h1 + 1 + F)
+    """
+    best, best_diff = [64, 32], float('inf')
+    for h1 in range(4, 256):
+        for h2 in range(2, h1 + 1):
+            t = h1 * (W + 1) + h2 * (h1 + 1 + F)
+            d = abs(t - target)
+            if d < best_diff:
+                best_diff = d
+                best = [h1, h2]
+    return best
+
+
+def _tune_res_kan(target, W, F):
+    """
+    搜索 ResKAN 的 (fcnn_dims=[fh1, fh2], kan_hidden) 使参数量最接近 target。
+
+    参数公式:
+      FCNN 主路:
+        Linear(W, fh1)+b  : W·fh1 + fh1
+        Linear(fh1, fh2)+b: fh1·fh2 + fh2
+        Linear(fh2, 1)+b  : fh2 + 1
+      KAN 残差:
+        KANLinear(W, kh)  : W·kh·F
+        KANLinear(kh, 1)  : kh·F
+      alpha: 1
+      ──────────────────────────
+      Total = fh1·(W+1) + fh2·(fh1+2) + 1 + kh·(W+1)·F + 1
+    """
+    best, best_diff = ([48, 24], 4), float('inf')
+    for fh1 in range(4, 128):
+        for fh2 in range(2, fh1 + 1):
+            fcnn_p = fh1 * (W + 1) + fh2 * (fh1 + 2) + 1
+            remaining = target - fcnn_p - 1   # -1 for alpha
+            if remaining < F * (W + 1) * 2:   # 至少 kh=2
+                continue
+            kh_opt = remaining / (F * (W + 1))
+            for kh in (max(2, int(kh_opt)), max(2, int(kh_opt) + 1)):
+                total = fcnn_p + kh * (W + 1) * F + 1
+                d = abs(total - target)
+                if d < best_diff:
+                    best_diff = d
+                    best = ([fh1, fh2], kh)
+    return best
+
+
+# ================= 配置生成器 =================
+
+def _build_configs():
+    """
+    根据 MATCH_PARAMS 开关和 BASE 基准，生成三个模型的训练配置。
+    MATCH_PARAMS=True 时自动微调隐层维度；False 时使用手动默认值。
+    """
+    shared = {
+        'window_size':  BASE['window_size'],
+        'sps':          BASE['sps'],
+        'grid_size':    BASE['grid_size'],
+        'spline_order': BASE['spline_order'],
+        'grid_range':   BASE['grid_range'],
+        'batch_size':   BASE['batch_size'],
+        'lr':           BASE['lr'],
+        'label_scale':  BASE['label_scale'],
+        'eval_interval': BASE['eval_interval'],
+        'device':       get_device(),
+    }
+
+    W = BASE['window_size']
+    F = _kan_factor()
+
+    if MATCH_PARAMS:
+        target = _fcnn_param_count(W, BASE['fcnn_hidden_dims'])
+
+        kan_fcnn_dims              = _tune_kan_fcnn(target, W, F)
+        hybrid_dims                = _tune_hybrid_kan(target, W, F)
+        res_fcnn_dims, res_kan_hid = _tune_res_kan(target, W, F)
+    else:
+        kan_fcnn_dims  = [16, 8]
+        hybrid_dims    = [64, 32]
+        res_fcnn_dims  = [64, 32]
+        res_kan_hid    = 8
+
+    kan_fcnn_cfg = {**shared, 'hidden_dims': kan_fcnn_dims, 'epochs': 30}
+    hybrid_cfg   = {**shared, 'linear_dims': hybrid_dims,   'epochs': 20}
+    res_cfg      = {**shared, 'fcnn_dims': res_fcnn_dims,
+                               'kan_hidden': res_kan_hid,   'epochs': 20}
+
+    return kan_fcnn_cfg, hybrid_cfg, res_cfg
+
+
+KAN_FCNN_CONFIG, HYBRID_KAN_CONFIG, RES_KAN_CONFIG = _build_configs()
+
+
 # ================= 数据集定义 =================
 class OpticalDataset(Dataset):
     def __init__(self, rx_signal, labels, window_size, sps,
@@ -86,9 +259,6 @@ class KANFCNNEqualizer(nn.Module):
     用 KANLinear (B-样条边激活) 完全替代 FCNN 的 Linear+ReLU。
     KAN 自带非线性 (SiLU 基 + 样条)，无需额外激活函数。
     层间加 LayerNorm 使中间激活落在样条网格范围内。
-
-    与 FCNN([64,32]) 的 3,521 参数相比，
-    本模型用 [16,8] + grid=5 + order=3 约 4,344 参数，量级相当。
     """
 
     def __init__(self, input_dim, hidden_dims=None,
@@ -107,24 +277,8 @@ class KANFCNNEqualizer(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, src):
-        x = src.squeeze(-1)  # (batch, window_size)
+        x = src.squeeze(-1)
         return self.net(x)
-
-
-KAN_FCNN_CONFIG = {
-    'window_size': 21,
-    'sps': 2,
-    'hidden_dims': [16, 8],
-    'grid_size': 5,
-    'spline_order': 3,
-    'grid_range': (-2.0, 2.0),
-    'batch_size': 256,
-    'epochs': 30,
-    'lr': 0.001,
-    'label_scale': 3.0,
-    'eval_interval': 1,
-    'device': get_device(),
-}
 
 
 def build_kan_fcnn(config, device):
@@ -149,8 +303,6 @@ class HybridKANEqualizer(nn.Module):
     核心假设: FCNN 的 Linear+ReLU 擅长线性特征提取 (撤色散)，
     但在最终的非线性映射步骤 (逆方检波) 上可能不够精确。
     用 KAN 替换最后一层可以更好地逼近该非线性函数。
-
-    参数量 ≈ FCNN + 一个 KAN 层的额外样条参数。
     """
 
     def __init__(self, input_dim, linear_dims=None,
@@ -177,22 +329,6 @@ class HybridKANEqualizer(nn.Module):
         return self.kan_out(x)
 
 
-HYBRID_KAN_CONFIG = {
-    'window_size': 21,
-    'sps': 2,
-    'linear_dims': [64, 32],
-    'grid_size': 5,
-    'spline_order': 3,
-    'grid_range': (-2.0, 2.0),
-    'batch_size': 256,
-    'epochs': 20,
-    'lr': 0.001,
-    'label_scale': 3.0,
-    'eval_interval': 1,
-    'device': get_device(),
-}
-
-
 def build_hybrid_kan(config, device):
     return HybridKANEqualizer(
         input_dim    = config['window_size'],
@@ -213,10 +349,6 @@ class ResKANEqualizer(nn.Module):
       残差路径 — 轻量 KAN 分支 (学习 FCNN 遗漏的非线性校正)
       输出 = FCNN(x) + α · KAN(x)，α 为可学习标量
 
-    核心假设: FCNN 已经能做到不错的均衡 (BER~1e-5)，
-    但可能存在系统性的残余非线性误差。KAN 分支专门学习这些
-    微小的非线性校正项，而 α 控制校正强度。
-
     优势: 即使 KAN 分支学不到有用信息 (α→0)，
     性能也不会比 FCNN 差。
     """
@@ -227,7 +359,6 @@ class ResKANEqualizer(nn.Module):
         if fcnn_dims is None:
             fcnn_dims = [64, 32]
 
-        # FCNN 主路径
         fcnn_layers = []
         in_dim = input_dim
         for h in fcnn_dims:
@@ -237,7 +368,6 @@ class ResKANEqualizer(nn.Module):
         fcnn_layers.append(nn.Linear(in_dim, 1))
         self.fcnn = nn.Sequential(*fcnn_layers)
 
-        # KAN 残差路径
         self.kan_branch = nn.Sequential(
             KANLinear(input_dim, kan_hidden, grid_size, spline_order, grid_range),
             KANLinear(kan_hidden, 1, grid_size, spline_order, grid_range),
@@ -250,23 +380,6 @@ class ResKANEqualizer(nn.Module):
         main_out = self.fcnn(x)
         kan_res  = self.kan_branch(x)
         return main_out + self.alpha * kan_res
-
-
-RES_KAN_CONFIG = {
-    'window_size': 21,
-    'sps': 2,
-    'fcnn_dims': [64, 32],
-    'kan_hidden': 8,
-    'grid_size': 5,
-    'spline_order': 3,
-    'grid_range': (-2.0, 2.0),
-    'batch_size': 256,
-    'epochs': 20,
-    'lr': 0.001,
-    'label_scale': 3.0,
-    'eval_interval': 1,
-    'device': get_device(),
-}
 
 
 def build_res_kan(config, device):
@@ -349,7 +462,7 @@ def evaluate(model, loader, device, criterion, label_scale):
     return avg_loss, ber
 
 
-# ================= 数据加载 (共享) =================
+# ================= 数据加载 =================
 def load_data():
     data = scipy.io.loadmat(str(ROOT / 'dataset_for_python.mat'))
 
@@ -375,7 +488,6 @@ def load_data():
 
 # ================= 单模型训练 =================
 def train_single(key, entry, data_dict):
-    """训练单个模型变体。"""
     display_name = entry['display']
     build_fn     = entry['build_fn']
     config       = entry['config']
@@ -398,6 +510,10 @@ def train_single(key, entry, data_dict):
     dev = config['device']
     log.info(f"运行设备: {dev}")
     log.info(f"配置参数: {config}")
+
+    if MATCH_PARAMS:
+        target = _fcnn_param_count(BASE['window_size'], BASE['fcnn_hidden_dims'])
+        log.info(f"[参数对齐] 目标参数量: {target:,} (FCNN {BASE['fcnn_hidden_dims']})")
 
     rx_mean, rx_std = data_dict['rx_mean'], data_dict['rx_std']
     log.info(f"归一化统计: mean={rx_mean:.4f}, std={rx_std:.4f}")
@@ -507,7 +623,6 @@ def train_single(key, entry, data_dict):
     log.info(f"模型已保存至:  {MODELS_DIR / ckpt_name}")
     log.info("=" * 60)
 
-    # ---------- 绘制训练曲线 ----------
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
     axes[0].plot(train_loss_history, label='Train Loss')
@@ -544,15 +659,35 @@ def train_single(key, entry, data_dict):
 
 # ================= 入口 =================
 def train_all(keys=None):
-    """
-    训练指定 (或全部) KAN 变体。
-    keys: 要训练的模型键名列表，None 表示全部。
-    """
     if keys is None:
         keys = list(MODEL_TABLE.keys())
 
+    # 打印参数对齐信息
+    target = _fcnn_param_count(BASE['window_size'], BASE['fcnn_hidden_dims'])
+    print("\n" + "=" * 62)
+    if MATCH_PARAMS:
+        print(f"  [参数对齐: ON]  目标 = {target:,} (FCNN {BASE['fcnn_hidden_dims']})")
+    else:
+        print(f"  [参数对齐: OFF]  FCNN 参数量 = {target:,} (仅供参考)")
+    print("=" * 62)
+
+    for k in keys:
+        entry = MODEL_TABLE[k]
+        cfg = entry['config']
+        tmp = entry['build_fn'](cfg, 'cpu')
+        p = sum(pp.numel() for pp in tmp.parameters())
+        dims_info = (cfg.get('hidden_dims') or
+                     cfg.get('linear_dims') or
+                     cfg.get('fcnn_dims', []))
+        extra = f", kan_h={cfg['kan_hidden']}" if 'kan_hidden' in cfg else ""
+        print(f"  {entry['display']:15s}  dims={dims_info}{extra}"
+              f"  →  {p:,} 参数 (Δ={p - target:+d})")
+        del tmp
+
+    print("=" * 62)
+
     data_dict = load_data()
-    print(f"\n数据已加载，将训练以下模型: {[MODEL_TABLE[k]['display'] for k in keys]}\n")
+    print(f"\n数据已加载，将训练: {[MODEL_TABLE[k]['display'] for k in keys]}\n")
 
     results = {}
     for k in keys:
