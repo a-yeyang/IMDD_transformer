@@ -131,91 +131,9 @@ save('symb_all.txt', 'symb_all','-ascii');
 save('symb_train.txt','symb_train','-ascii');
 save('symb_test.txt','symb_test','-ascii');
 
+% 频谱：带限前 tx_train、带限后 tx_train_bl（采样率 Fs 与 Plotspectrum 频率轴一致）
+Plotspectrum(tx_train, Fs, false, 'label', 'No Bandwidth Limit', 'color', 'b');
+Plotspectrum(tx_train_bl, Fs, false, 'newfig', false, 'label', 'Bandwidth Limit', 'color', 'r');
 
-% 原始信号和带限后的信号
-sig1 = tx_train;        % 带限前
-sig2 = tx_train_bl;   % 带限后
-
-Nfft = 2^14;            % FFT 点数，取大一点看得更细
-f = (-Nfft/2:Nfft/2-1)*(Fs/Nfft);  % 频率坐标 (Hz)
-
-% 归一化幅度谱（双边谱）
-S1 = fftshift(abs(fft(sig1, Nfft)))/max(abs(fft(sig1, Nfft)));
-S2 = fftshift(abs(fft(sig2, Nfft)))/max(abs(fft(sig2, Nfft)));
-
-% 画图1 - 双边谱（与plotspectrum.m风格一致）
-figure('Color', 'white', 'Position', [100, 100, 800, 600]);  % 白色背景，设置图形大小
-plot(f/1e9, 20*log10(S1+eps), 'b-', 'LineWidth', 1.5); hold on;
-plot(f/1e9, 20*log10(S2+eps), 'r-', 'LineWidth', 1.5);
-
-% 设置坐标轴标签 - 与plotspectrum.m风格一致
-xlabel('Frequency (GHz)', 'FontSize', 16, 'FontWeight', 'bold', 'FontName', 'Times New Roman');
-ylabel('Magnitude (dB)', 'FontSize', 16, 'FontWeight', 'bold', 'FontName', 'Times New Roman');
-
-% 设置图例 - 与plotspectrum.m风格一致
-legend('No Bandwidth Limit', 'Bandwidth Limit', 'FontSize', 18, 'FontWeight', 'bold', ...
-       'Location', 'best', 'Box', 'on', 'EdgeColor', 'black', 'LineWidth', 1.0, 'FontName', 'Times New Roman');
-
-% 设置坐标轴属性 - 与plotspectrum.m风格一致
-ax = gca;
-ax.FontSize = 18;  % 坐标轴刻度字体大小
-ax.FontWeight = 'bold';
-ax.FontName = 'Times New Roman';
-ax.LineWidth = 1;  % 坐标轴线宽
-ax.Box = 'on';  % 显示坐标轴框
-ax.GridLineStyle = '-';  % 主网格线样式（实线）
-ax.GridAlpha = 0.3;  % 主网格线透明度
-ax.MinorGridLineStyle = ':';  % 次网格线样式（点线）
-ax.MinorGridAlpha = 0.2;  % 次网格线透明度
-ax.TickLength = [0.01, 0.02];  % 刻度长度
-
-grid on;
-grid minor;
-axis tight;
-
-% 单边谱计算（只取正频率部分）
-f_single = (0:Nfft/2-1)*(Fs/Nfft);  % 单边频率坐标 (0 到 Fs/2)
-S1_single = abs(fft(sig1, Nfft));   % 双边FFT结果
-S2_single = abs(fft(sig2, Nfft));   % 双边FFT结果
-S1_single = S1_single(1:Nfft/2);   % 只取正频率部分
-S2_single = S2_single(1:Nfft/2);   % 只取正频率部分
-S1_single = S1_single / max(S1_single);  % 归一化
-S2_single = S2_single / max(S2_single);  % 归一化
-
-% 降采样以获得清晰的轮廓线（每隔N个点取一个）
-downsample_factor = max(1, floor(length(f_single) / 1000));  % 大约保留1000个点
-idx_downsample = 1:downsample_factor:length(f_single);
-f_single_outline = f_single(idx_downsample);
-S1_single_outline = S1_single(idx_downsample);
-S2_single_outline = S2_single(idx_downsample);
-
-% 画图2 - 单边谱（与plotspectrum.m风格一致）
-figure('Color', 'white', 'Position', [100, 100, 800, 600]);  % 白色背景，设置图形大小
-plot(f_single_outline/1e9, 20*log10(S1_single_outline+eps), 'b-', 'LineWidth', 1.5, 'Marker', 'none'); hold on;
-plot(f_single_outline/1e9, 20*log10(S2_single_outline+eps), 'r-', 'LineWidth', 1.5, 'Marker', 'none');
-
-% 设置坐标轴标签 - 与plotspectrum.m风格一致
-xlabel('Frequency (GHz)', 'FontSize', 16, 'FontWeight', 'bold', 'FontName', 'Times New Roman');
-ylabel('Magnitude (dB)', 'FontSize', 16, 'FontWeight', 'bold', 'FontName', 'Times New Roman');
-
-% 设置图例 - 与plotspectrum.m风格一致
-legend('Before filtering', 'After Butterworth', 'FontSize', 18, 'FontWeight', 'bold', ...
-       'Location', 'best', 'Box', 'on', 'EdgeColor', 'black', 'LineWidth', 1.0, 'FontName', 'Times New Roman');
-
-% 设置坐标轴属性 - 与plotspectrum.m风格一致
-ax = gca;
-ax.FontSize = 18;  % 坐标轴刻度字体大小
-ax.FontWeight = 'bold';
-ax.FontName = 'Times New Roman';
-ax.LineWidth = 1;  % 坐标轴线宽
-ax.Box = 'on';  % 显示坐标轴框
-ax.GridLineStyle = '-';  % 主网格线样式（实线）
-ax.GridAlpha = 0.3;  % 主网格线透明度
-ax.MinorGridLineStyle = ':';  % 次网格线样式（点线）
-ax.MinorGridAlpha = 0.2;  % 次网格线透明度
-ax.TickLength = [0.01, 0.02];  % 刻度长度
-
-grid on;
-grid minor;
-axis tight;
-xlim([0, max(f_single_outline/1e9)]);  % 只显示正频率部分
+Plotspectrum(tx_train, Fs, true, 'label', 'Before filtering', 'color', 'b');
+Plotspectrum(tx_train_bl, Fs, true, 'newfig', false, 'label', 'After Butterworth', 'color', 'r');
