@@ -55,7 +55,7 @@ CONFIG = {
     'grid_range': (-2.0, 2.0),
     'grad_clip': 1.0,         # 梯度裁剪 (BPTT 稳定性)
     'batch_size': 256,
-    'epochs': 50,
+    'epochs': 30,
     'lr': 0.001,
     'label_scale': 3.0,
     'eval_interval': 1,
@@ -329,143 +329,129 @@ def evaluate(model, loader, device, criterion, label_scale):
     return avg_loss, ber
 
 
-# ================= 训练流程 =================
-def train():
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path  = LOGS_DIR / f'rkan_train_{timestamp}.log'
-    log = logging.getLogger('rkan_trainer')
-    log.setLevel(logging.INFO)
-    log.handlers.clear()
-    log.addHandler(logging.FileHandler(log_path, mode='w', encoding='utf-8'))
-    log.addHandler(logging.StreamHandler())
-    formatter = logging.Formatter('%(asctime)s | %(message)s', datefmt='%H:%M:%S')
-    for h in log.handlers:
-        h.setFormatter(formatter)
+# ================= 训练流程（可复用：CLI 与超参扫描） =================
+def run_training(
+    config,
+    rx_train,
+    symb_train,
+    rx_test,
+    symb_test,
+    rx_mean,
+    rx_std,
+    log,
+    *,
+    save_checkpoint_path=None,
+    save_plot_path=None,
+    log_epochs=True,
+):
+    """
+    在给定 config 与数据上完整训练一轮 RKAN。
 
-    log.info("=" * 60)
-    log.info("  RKAN Equalizer — 训练开始")
-    log.info("=" * 60)
-    dev = CONFIG['device']
-    log.info(f"运行设备: {dev} (NVIDIA CUDA)" if dev == 'cuda' else
-             f"运行设备: {dev} (Apple MPS)" if dev == 'mps' else f"运行设备: {dev} (CPU)")
-    log.info(f"配置参数: {CONFIG}")
+    config 需含: window_size, sps, hidden_size, grid_size, spline_order, grid_range,
+                  grad_clip, batch_size, epochs, lr, label_scale, eval_interval, device
 
-    # ---------- 数据加载 ----------
-    data = scipy.io.loadmat(str(ROOT / 'dataset_for_python.mat'))
-
-    rx_train = data['rx_train_export'].flatten()
-    if np.iscomplexobj(rx_train):
-        log.info("检测到复数信号，取绝对值作为 IM/DD 包络")
-        rx_train = np.abs(rx_train)
-    symb_train = data['symb_train_export'].flatten()
-
-    rx_test = data['rx_test_export'].flatten()
-    if np.iscomplexobj(rx_test):
-        rx_test = np.abs(rx_test)
-    symb_test = data['symb_test_export'].flatten()
-
-    rx_mean = float(np.mean(rx_train))
-    rx_std  = float(np.std(rx_train))
-    log.info(f"归一化统计 (训练集): mean={rx_mean:.4f}, std={rx_std:.4f}")
-    log.info(f"训练信号点数: {len(rx_train):,}  |  训练符号数: {len(symb_train):,}")
-    log.info(f"测试信号点数: {len(rx_test):,}   |  测试符号数: {len(symb_test):,}")
-
+    Returns:
+        dict: best_val_loss, best_val_ber, best_epoch, last_train_loss,
+              train_loss_history, val_loss_history, val_ber_history
+    """
     train_dataset = OpticalDataset(
-        rx_train, symb_train, CONFIG['window_size'], CONFIG['sps'],
-        rx_mean=rx_mean, rx_std=rx_std, label_scale=CONFIG['label_scale']
+        rx_train, symb_train, config['window_size'], config['sps'],
+        rx_mean=rx_mean, rx_std=rx_std, label_scale=config['label_scale'],
     )
     test_dataset = OpticalDataset(
-        rx_test, symb_test, CONFIG['window_size'], CONFIG['sps'],
-        rx_mean=rx_mean, rx_std=rx_std, label_scale=CONFIG['label_scale']
+        rx_test, symb_test, config['window_size'], config['sps'],
+        rx_mean=rx_mean, rx_std=rx_std, label_scale=config['label_scale'],
     )
-    train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'],
-                              shuffle=True,  num_workers=0)
-    test_loader  = DataLoader(test_dataset,  batch_size=CONFIG['batch_size'],
-                              shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=0,
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=0,
+    )
 
-    # ---------- 模型初始化 ----------
-    model = build_rkan(CONFIG, CONFIG['device'])
-
-    log.info("\n===== RKAN 参数量统计 =====")
-    count_parameters(model, log)
-    log.info("============================\n")
-
+    model = build_rkan(config, config['device'])
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=CONFIG['lr'])
+    optimizer = optim.Adam(model.parameters(), lr=config['lr'])
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=CONFIG['epochs'], eta_min=1e-5
+        optimizer, T_max=config['epochs'], eta_min=1e-5,
     )
 
-    # ---------- 训练循环 ----------
     train_loss_history = []
-    val_loss_history   = []
-    val_ber_history    = []
-
+    val_loss_history = []
+    val_ber_history = []
     best_val_loss = float('inf')
-    best_val_ber  = float('inf')
-    best_epoch    = 0
+    best_val_ber = float('inf')
+    best_epoch = 0
+    last_train_loss = 0.0
 
     model.train()
-    for epoch in range(1, CONFIG['epochs'] + 1):
+    for epoch in range(1, config['epochs'] + 1):
         epoch_start = time.perf_counter()
-        epoch_loss  = 0.0
+        epoch_loss = 0.0
 
         for inputs, targets in train_loader:
-            inputs  = inputs.unsqueeze(-1).to(CONFIG['device'])
-            targets = targets.to(CONFIG['device'])
-
+            inputs = inputs.unsqueeze(-1).to(config['device'])
+            targets = targets.to(config['device'])
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss    = criterion(outputs, targets)
+            loss = criterion(outputs, targets)
             loss.backward()
-            # BPTT 梯度裁剪：防止递归展开时梯度爆炸
-            torch.nn.utils.clip_grad_norm_(model.parameters(), CONFIG['grad_clip'])
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config['grad_clip'])
             optimizer.step()
             epoch_loss += loss.item()
 
         scheduler.step()
-        epoch_time     = time.perf_counter() - epoch_start
+        epoch_time = time.perf_counter() - epoch_start
         avg_train_loss = epoch_loss / len(train_loader)
+        last_train_loss = avg_train_loss
         train_loss_history.append(avg_train_loss)
         current_lr = optimizer.param_groups[0]['lr']
 
-        if epoch % CONFIG['eval_interval'] == 0:
+        if epoch % config['eval_interval'] == 0:
             val_loss, val_ber = evaluate(
-                model, test_loader, CONFIG['device'], criterion, CONFIG['label_scale']
+                model, test_loader, config['device'], criterion, config['label_scale'],
             )
             val_loss_history.append(val_loss)
             val_ber_history.append(val_ber)
 
-            log.info(
-                f"Epoch [{epoch:3d}/{CONFIG['epochs']}] "
-                f"Time: {epoch_time:5.1f}s | "
-                f"Train Loss: {avg_train_loss:.6f} | "
-                f"Val Loss: {val_loss:.6f} | "
-                f"Val BER: {val_ber:.4e} | "
-                f"LR: {current_lr:.2e}"
-            )
+            if log_epochs and log is not None:
+                log.info(
+                    f"Epoch [{epoch:3d}/{config['epochs']}] "
+                    f"Time: {epoch_time:5.1f}s | "
+                    f"Train Loss: {avg_train_loss:.6f} | "
+                    f"Val Loss: {val_loss:.6f} | "
+                    f"Val BER: {val_ber:.4e} | "
+                    f"LR: {current_lr:.2e}",
+                )
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                best_val_ber  = val_ber
-                best_epoch    = epoch
-                save_path = MODELS_DIR / 'rkan_model.pth'
-                torch.save({
-                    'model_state_dict': model.state_dict(),
-                    'model_type': 'RKAN',
-                    'rx_mean': rx_mean,
-                    'rx_std':  rx_std,
-                    'config':  CONFIG,
-                    'epoch':   epoch,
-                    'best_val_loss': best_val_loss,
-                    'best_val_ber':  best_val_ber,
-                }, str(save_path))
-                log.info(f"  ★ 最优模型已更新 → Epoch {epoch}, Val Loss={val_loss:.6f}, Val BER={val_ber:.4e}")
-        else:
+                best_val_ber = val_ber
+                best_epoch = epoch
+                if save_checkpoint_path is not None:
+                    torch.save(
+                        {
+                            'model_state_dict': model.state_dict(),
+                            'model_type': 'RKAN',
+                            'rx_mean': rx_mean,
+                            'rx_std': rx_std,
+                            'config': config,
+                            'epoch': epoch,
+                            'best_val_loss': best_val_loss,
+                            'best_val_ber': best_val_ber,
+                        },
+                        str(save_checkpoint_path),
+                    )
+                    if log is not None:
+                        log.info(
+                            f"  ★ 最优模型已更新 → Epoch {epoch}, "
+                            f"Val Loss={val_loss:.6f}, Val BER={val_ber:.4e}",
+                        )
+        elif log_epochs and log is not None:
             log.info(
-                f"Epoch [{epoch:3d}/{CONFIG['epochs']}] "
+                f"Epoch [{epoch:3d}/{config['epochs']}] "
                 f"Time: {epoch_time:5.1f}s | "
-                f"Train Loss: {avg_train_loss:.6f} | LR: {current_lr:.2e}"
+                f"Train Loss: {avg_train_loss:.6f} | LR: {current_lr:.2e}",
             )
 
     log.info("\n" + "=" * 60)

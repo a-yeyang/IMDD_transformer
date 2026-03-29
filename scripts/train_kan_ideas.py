@@ -1,7 +1,6 @@
 """
 KAN 均衡器变体 — 训练脚本
 
-基于 RKAN 实验的结论：递归结构在固定窗口 IM/DD 均衡中无优势。
 本脚本探索三种将 KAN 与前馈结构结合的方案：
 
   方案 1: KAN-FCNN   — 纯 KAN 前馈网络 (KANLinear 替代 Linear+ReLU)
@@ -23,6 +22,7 @@ KAN 均衡器变体 — 训练脚本
 import sys
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import scipy.io
@@ -41,7 +41,85 @@ MODELS_DIR.mkdir(exist_ok=True)
 IMAGES_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
-from train_rkan import KANLinear
+
+# ================= KAN 线性层 =================
+class KANLinear(nn.Module):
+    """
+    KAN (Kolmogorov-Arnold Network) 线性层。
+
+    每条边 (i->j) 上放置一个可学习单变量函数：
+        phi_{j,i}(x_i) = w_b_{j,i} * SiLU(x_i) + sum_l c_{j,i,l} * B_l^k(x_i)
+
+    参数:
+        in_features   – 输入维度
+        out_features  – 输出维度
+        grid_size     – B-样条均匀网格区间数 G
+        spline_order  – B-样条阶数 k (3 = 三次)
+        grid_range    – 网格覆盖范围 [a, b]
+
+    内部张量:
+        grid          – (in, G+2k+1) 含两端扩展的节点向量
+        spline_weight – (out, in, G+k) 样条系数
+        base_weight   – (out, in) SiLU 基权重
+    """
+
+    def __init__(self, in_features, out_features, grid_size=5, spline_order=3,
+                 grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.in_features  = in_features
+        self.out_features = out_features
+        self.grid_size    = grid_size
+        self.spline_order = spline_order
+        self.num_bases     = grid_size + spline_order
+
+        h = (grid_range[1] - grid_range[0]) / grid_size
+        grid = torch.linspace(
+            grid_range[0] - h * spline_order,
+            grid_range[1] + h * spline_order,
+            grid_size + 2 * spline_order + 1,
+        )
+        self.register_buffer('grid', grid.unsqueeze(0).expand(in_features, -1).contiguous())
+
+        self.spline_weight = nn.Parameter(
+            torch.randn(out_features, in_features, self.num_bases) * 0.1
+        )
+        self.base_weight = nn.Parameter(
+            nn.init.kaiming_uniform_(torch.empty(out_features, in_features), a=5**0.5)
+        )
+
+    def _bspline_bases(self, x):
+        """
+        向量化 de Boor 递推，计算 k 阶 B-样条基。
+        x:       (..., in_features)
+        Returns: (..., in_features, num_bases)
+        """
+        x_expand = x.unsqueeze(-1)
+
+        bases = ((x_expand >= self.grid[..., :-1]) &
+                 (x_expand <  self.grid[..., 1:])).to(x.dtype)
+
+        for p in range(1, self.spline_order + 1):
+            left_num  = x_expand - self.grid[..., :-(p + 1)]
+            left_den  = (self.grid[..., p:-1] - self.grid[..., :-(p + 1)]).clamp(min=1e-8)
+            right_num = self.grid[..., (p + 1):] - x_expand
+            right_den = (self.grid[..., (p + 1):] - self.grid[..., 1:(-p)]).clamp(min=1e-8)
+
+            bases = (left_num / left_den) * bases[..., :-1] \
+                  + (right_num / right_den) * bases[..., 1:]
+
+        return bases
+
+    def forward(self, x):
+        """x: (..., in_features) -> (..., out_features)"""
+        base_out = F.linear(F.silu(x), self.base_weight)
+
+        bases = self._bspline_bases(x)
+        batch_shape = x.shape[:-1]
+        flat_bases  = bases.reshape(-1, self.in_features * self.num_bases)
+        flat_weight = self.spline_weight.reshape(self.out_features, -1)
+        spline_out  = F.linear(flat_bases, flat_weight).reshape(*batch_shape, self.out_features)
+
+        return base_out + spline_out
 
 
 def get_device():

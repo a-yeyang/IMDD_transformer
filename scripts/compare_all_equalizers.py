@@ -1,5 +1,5 @@
 """
-七种均衡器综合对比测试 (不含 Transformer 系列)
+六种均衡器综合对比测试 (不含 Transformer 系列)
 
 在 SNR = 0, 5, 10, 15, 20, 25 dB 及无噪声条件下评估所有模型的 BER，
 并输出对比表格、CSV 和 BER vs SNR 曲线图。
@@ -10,10 +10,9 @@
     2. DNN            (dnn_model.pth)
     3. BiLSTM         (bilstm_model.pth)
   KAN 变体:
-    4. RKAN           (rkan_model.pth)         — 递归 KAN (对照)
-    5. KAN-FCNN       (kan_fcnn_model.pth)     — 纯 KAN 前馈
-    6. Hybrid-KAN     (hybrid_kan_model.pth)   — FCNN 前端 + KAN 输出
-    7. ResKAN         (res_kan_model.pth)      — FCNN + KAN 残差
+    4. KAN-FCNN       (kan_fcnn_model.pth)     — 纯 KAN 前馈
+    5. Hybrid-KAN     (hybrid_kan_model.pth)   — FCNN 前端 + KAN 输出
+    6. ResKAN         (res_kan_model.pth)      — FCNN + KAN 残差
 
 性能优化说明:
   - 每个模型的 checkpoint 只从磁盘加载一次（原来每个 SNR 点都重复加载）
@@ -76,12 +75,8 @@ from train_bilstm import (
     BiLSTMEqualizer,
     CONFIG as BILSTM_CONFIG,
 )
-from train_rkan import (
-    RKANEqualizer, KANLinear, RKANCell,
-    build_rkan,
-    CONFIG as RKAN_CONFIG,
-)
 from train_kan_ideas import (
+    KANLinear,
     KANFCNNEqualizer,
     HybridKANEqualizer,
     ResKANEqualizer,
@@ -215,14 +210,6 @@ MODEL_REGISTRY = [
         'group': 'baseline',
     },
     # --- KAN 变体 ---
-    # {
-    #     'name': 'RKAN', 'tag': 'RKAN',
-    #     'ckpt': 'rkan_model.pth',
-    #     'build_fn': build_rkan,
-    #     'default_config': dict(RKAN_CONFIG),
-    #     'color': 'C5', 'marker': 'x', 'ls': '--',
-    #     'group': 'kan',
-    # },
     {
         'name': 'KAN-FCNN', 'tag': 'KANFCNN',
         'ckpt': 'kan_fcnn_model.pth',
@@ -297,8 +284,8 @@ def test():
     log, log_path = setup_logger()
 
     log.info("=" * 80)
-    log.info("   七种均衡器综合对比 — BER vs SNR")
-    log.info("   (FCNN / DNN / BiLSTM / RKAN / KAN-FCNN / Hybrid-KAN / ResKAN)")
+    log.info("   六种均衡器综合对比 — BER vs SNR")
+    log.info("   (FCNN / DNN / BiLSTM / KAN-FCNN / Hybrid-KAN / ResKAN)")
     log.info("=" * 80)
 
     if FORCE_CPU:
