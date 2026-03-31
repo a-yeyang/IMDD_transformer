@@ -492,7 +492,7 @@ def test():
     x_labels = [snr_label(s) for s in SNR_LIST]
     x_pos    = np.arange(len(x_labels))
 
-    fig, ax = plt.subplots(figsize=(13, 7))
+    fig, ax = plt.subplots(figsize=(8, 8))
     for entry in available:
         bers = [results[entry['tag']].get(s, np.nan) for s in SNR_LIST]
         ax.semilogy(
