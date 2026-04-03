@@ -279,6 +279,38 @@ def _model_worker(task_args):
     return tag, model_results
 
 
+def load_external_classical_results(csv_path):
+    """从已有 CSV 读取外部生成的经典均衡器结果，避免被 Python 测试覆盖。"""
+    external_results = {}
+    if not csv_path.exists():
+        return external_results
+
+    with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        external_names = [name for name in ('CMA', 'Volterra') if name in fieldnames]
+        if not external_names:
+            return external_results
+
+        for name in external_names:
+            external_results[name] = {}
+
+        for row in reader:
+            snr_name = row.get('SNR')
+            if not snr_name:
+                continue
+            for name in external_names:
+                value = row.get(name, '')
+                if value in ('', None):
+                    continue
+                try:
+                    external_results[name][snr_name] = float(value)
+                except ValueError:
+                    continue
+
+    return external_results
+
+
 # ================= 主测试流程 =================
 def test():
     log, log_path = setup_logger()
@@ -378,6 +410,11 @@ def test():
     log.info(f"[INFO] 可用模型: {len(available)}")
     log.info(f"[INFO] batch 大小: {BATCH_SIZE}\n")
 
+    csv_path = ROOT / 'all_equalizer_comparison.csv'
+    external_results = load_external_classical_results(csv_path)
+    if external_results:
+        log.info(f"[INFO] 检测到外部经典均衡器结果，将从已有 CSV 保留: {list(external_results)}")
+
     # ---------- 推理：根据 FORCE_CPU 选择并行或串行路径 ----------
     results = {entry['tag']: {} for entry in available}
 
@@ -451,10 +488,10 @@ def test():
                 log.info(f"  [{entry['tag']:8s}] SNR={snr_label(snr):8s}  →  BER = {ber:.4e}")
 
     # ---------- 汇总表格 ----------
-    names = [e['name'] for e in available]
+    names = [e['name'] for e in available] + list(external_results.keys())
 
     col_width = max(16, max(len(n) for n in names) + 4)
-    sep_len   = 14 + col_width * len(available)
+    sep_len   = 14 + col_width * len(names)
 
     log.info("\n" + "=" * sep_len)
     log.info("         BER 对比汇总（PAM4 硬判决，门限 -2 / 0 / 2）")
@@ -474,6 +511,10 @@ def test():
             ber = results[entry['tag']].get(snr, float('nan'))
             row_str += f" {ber:^{col_width - 2}.4e} |"
             csv_row[entry['name']] = ber
+        for name, values in external_results.items():
+            ber = values.get(snr_label(snr), float('nan'))
+            row_str += f" {ber:^{col_width - 2}.4e} |"
+            csv_row[name] = ber
         log.info(row_str)
         csv_rows.append(csv_row)
 
@@ -500,6 +541,19 @@ def test():
             marker=entry['marker'], linestyle=entry['ls'],
             linewidth=2, markersize=8,
             color=entry['color'], label=entry['name'],
+        )
+    external_styles = {
+        'CMA': {'color': 'C5', 'marker': 'X', 'ls': ':'},
+        'Volterra': {'color': 'C9', 'marker': 'P', 'ls': ':'},
+    }
+    for name, values in external_results.items():
+        style = external_styles.get(name, {'color': None, 'marker': 'o', 'ls': ':'})
+        bers = [values.get(s, np.nan) for s in x_labels]
+        ax.semilogy(
+            x_pos, bers,
+            marker=style['marker'], linestyle=style['ls'],
+            linewidth=2, markersize=8,
+            color=style['color'], label=name,
         )
 
     ax.set_xticks(x_pos)
