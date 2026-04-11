@@ -1,19 +1,18 @@
 """
 ROP 泛化实验 — 训练脚本
 
-在 ROP=0 dBm 数据（dataset_rop0_for_python.mat）上训练六种均衡器：
-  FCNN / DNN / BiLSTM / KAN-FCNN / Hybrid-KAN / ResKAN
-
-checkpoint 以 _rop 后缀保存到 models/ 目录，供 test_rop.py 加载。
+在 ROP=0 dBm 数据（dataset_rop0_for_python.mat）上训练均衡器。
 
 运行方式:
-  python train_all_rop.py           # 训练全部六种模型
-  python train_all_rop.py fcnn dnn  # 仅训练指定模型（可用: fcnn dnn bilstm kan_fcnn hybrid_kan res_kan）
+  python train_all_rop.py                              # 训练全部模型
+  python train_all_rop.py --models fcnn vanilla_kan     # 仅训练指定模型
+  python train_all_rop.py --list                        # 列出所有可用 key
 """
 
 import sys
 import time
 import logging
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -30,9 +29,14 @@ from train_fcnn    import FCNNEqualizer,   OpticalDataset, CONFIG as FCNN_CFG
 from train_dnn     import DNNEqualizer,    CONFIG as DNN_CFG
 from train_bilstm  import BiLSTMEqualizer, CONFIG as BILSTM_CFG
 from train_kan_ideas import (
-    build_kan_fcnn,   KAN_FCNN_CONFIG,
-    build_hybrid_kan, HYBRID_KAN_CONFIG,
-    build_res_kan,    RES_KAN_CONFIG,
+    build_vanilla_kan,    VANILLA_KAN_CONFIG,
+    build_kan_fcnn,       KAN_FCNN_CONFIG,
+    build_hybrid_kan,     HYBRID_KAN_CONFIG,
+    build_res_kan,        RES_KAN_CONFIG,
+    build_conv_kan,       CONV_KAN_CONFIG,
+    build_kan_attention,  KAN_ATTN_CONFIG,
+    build_multiscale_kan, MULTISCALE_KAN_CONFIG,
+    build_gated_kan,      GATED_KAN_CONFIG,
 )
 
 ROOT       = Path(__file__).parent.parent
@@ -86,6 +90,10 @@ def _build_bilstm(config):
     ).to(DEVICE)
 
 
+def _build_vanilla_kan(config):
+    return build_vanilla_kan(config, DEVICE)
+
+
 def _build_kan_fcnn(config):
     return build_kan_fcnn(config, DEVICE)
 
@@ -96,6 +104,22 @@ def _build_hybrid_kan(config):
 
 def _build_res_kan(config):
     return build_res_kan(config, DEVICE)
+
+
+def _build_conv_kan(config):
+    return build_conv_kan(config, DEVICE)
+
+
+def _build_kan_attn(config):
+    return build_kan_attention(config, DEVICE)
+
+
+def _build_multiscale_kan(config):
+    return build_multiscale_kan(config, DEVICE)
+
+
+def _build_gated_kan(config):
+    return build_gated_kan(config, DEVICE)
 
 
 # ================= 模型注册表 =================
@@ -116,6 +140,11 @@ MODEL_REGISTRY = [
         'ckpt': 'bilstm_rop_model.pth', 'epochs': 50,
     },
     {
+        'key': 'vanilla_kan', 'name': 'VanillaKAN',
+        'build': _build_vanilla_kan, 'cfg': dict(VANILLA_KAN_CONFIG),
+        'ckpt': 'vanilla_kan_rop_model.pth', 'epochs': 25,
+    },
+    {
         'key': 'kan_fcnn',   'name': 'KAN-FCNN',
         'build': _build_kan_fcnn,    'cfg': dict(KAN_FCNN_CONFIG),
         'ckpt': 'kan_fcnn_rop_model.pth', 'epochs': 30,
@@ -130,7 +159,29 @@ MODEL_REGISTRY = [
         'build': _build_res_kan,     'cfg': dict(RES_KAN_CONFIG),
         'ckpt': 'res_kan_rop_model.pth', 'epochs': 20,
     },
+    {
+        'key': 'conv_kan',   'name': 'ConvKAN',
+        'build': _build_conv_kan,    'cfg': dict(CONV_KAN_CONFIG),
+        'ckpt': 'conv_kan_rop_model.pth', 'epochs': 25,
+    },
+    {
+        'key': 'kan_attn',   'name': 'KAN-Attention',
+        'build': _build_kan_attn,    'cfg': dict(KAN_ATTN_CONFIG),
+        'ckpt': 'kan_attn_rop_model.pth', 'epochs': 25,
+    },
+    {
+        'key': 'multiscale_kan', 'name': 'MultiScale-KAN',
+        'build': _build_multiscale_kan, 'cfg': dict(MULTISCALE_KAN_CONFIG),
+        'ckpt': 'multiscale_kan_rop_model.pth', 'epochs': 25,
+    },
+    {
+        'key': 'gated_kan',  'name': 'GatedKAN',
+        'build': _build_gated_kan,   'cfg': dict(GATED_KAN_CONFIG),
+        'ckpt': 'gated_kan_rop_model.pth', 'epochs': 25,
+    },
 ]
+
+_KEY_TO_ENTRY = {e['key']: e for e in MODEL_REGISTRY}
 
 
 # ================= 数据加载 =================
@@ -238,7 +289,6 @@ def train_one(entry, rx_train, rx_test, sym_train, sym_test, rx_mean, rx_std, lo
 
     log.info(f"  ★ Best Epoch={best_epoch}, Val BER={best_val_ber:.3e}\n")
 
-    # 保存训练曲线
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     axes[0].plot(train_hist, label='Train Loss')
     axes[0].plot(val_hist,   label='Val Loss')
@@ -268,16 +318,19 @@ def main(keys=None):
     log.addHandler(fh);   log.addHandler(sh)
 
     log.info("=" * 65)
-    log.info("  ROP 泛化实验 — 全模型训练  (数据: ROP=0 dBm)")
-    log.info(f"  设备: {DEVICE}")
+    log.info("  ROP 泛化实验 — 模型训练  (数据: ROP=0 dBm)")
+    log.info(f"  设备: {DEVICE}  全部模型数: {len(MODEL_REGISTRY)}")
     log.info("=" * 65)
 
     rx_train, rx_test, sym_train, sym_test, rx_mean, rx_std = load_data()
     log.info(f"训练: {len(rx_train):,} pts  测试: {len(rx_test):,} pts")
     log.info(f"归一化: mean={rx_mean:.4f}, std={rx_std:.4f}\n")
 
-    targets = {e['key']: e for e in MODEL_REGISTRY}
-    to_run  = [targets[k] for k in (keys or targets.keys()) if k in targets]
+    to_run = [_KEY_TO_ENTRY[k] for k in (keys or _KEY_TO_ENTRY.keys())
+              if k in _KEY_TO_ENTRY]
+
+    if keys:
+        log.info(f"本次训练: {[e['name'] for e in to_run]}\n")
 
     for entry in to_run:
         log.info(f"▶ 训练 {entry['name']} (epochs={entry['epochs']}) ...")
@@ -287,11 +340,36 @@ def main(keys=None):
 
 
 if __name__ == '__main__':
-    requested = sys.argv[1:] if len(sys.argv) > 1 else None
-    if requested:
-        valid = [k for k in requested if k in {e['key'] for e in MODEL_REGISTRY}]
+    parser = argparse.ArgumentParser(
+        description='ROP 泛化实验 — 训练脚本',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='示例:\n'
+               '  python train_all_rop.py                           # 全部\n'
+               '  python train_all_rop.py --models fcnn vanilla_kan # 指定\n'
+               '  python train_all_rop.py --list                    # 列出 key',
+    )
+    parser.add_argument('--models', nargs='+', metavar='KEY',
+                        help='仅训练指定 key 的模型 (可多个)')
+    parser.add_argument('--list', action='store_true',
+                        help='列出所有可用模型 key 后退出')
+    # 兼容旧的位置参数用法
+    parser.add_argument('legacy_keys', nargs='*', help=argparse.SUPPRESS)
+    args = parser.parse_args()
+
+    if args.list:
+        print("可用模型 key:")
+        for e in MODEL_REGISTRY:
+            print(f"  {e['key']:18s}  ({e['name']})")
+        sys.exit(0)
+
+    keys = args.models or args.legacy_keys or None
+    if keys:
+        valid = [k for k in keys if k in _KEY_TO_ENTRY]
+        invalid = [k for k in keys if k not in _KEY_TO_ENTRY]
+        if invalid:
+            print(f"[警告] 未知 key 已忽略: {invalid}")
+            print(f"       可用: {sorted(_KEY_TO_ENTRY.keys())}")
         if not valid:
-            print(f"可用模型: {[e['key'] for e in MODEL_REGISTRY]}")
             sys.exit(1)
         main(valid)
     else:

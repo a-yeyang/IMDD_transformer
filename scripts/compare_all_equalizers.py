@@ -1,5 +1,5 @@
 """
-六种均衡器综合对比测试 (不含 Transformer 系列)
+均衡器综合对比测试 (不含 Transformer 系列)
 
 在 SNR = 0, 5, 10, 15, 20, 25 dB 及无噪声条件下评估所有模型的 BER，
 并输出对比表格、CSV 和 BER vs SNR 曲线图。
@@ -10,26 +10,27 @@
     2. DNN            (dnn_model.pth)
     3. BiLSTM         (bilstm_model.pth)
   KAN 变体:
-    4. KAN-FCNN       (kan_fcnn_model.pth)     — 纯 KAN 前馈
-    5. Hybrid-KAN     (hybrid_kan_model.pth)   — FCNN 前端 + KAN 输出
-    6. ResKAN         (res_kan_model.pth)      — FCNN + KAN 残差
+    4. VanillaKAN     (vanilla_kan_model.pth) — 纯 KAN 基准
+    5. KAN-FCNN       (kan_fcnn_model.pth)    — KAN 前馈
+    6. Hybrid-KAN     (hybrid_kan_model.pth)  — FCNN 前端 + KAN 输出
+    7. ResKAN         (res_kan_model.pth)     — FCNN + KAN 残差
+    8. ConvKAN        (conv_kan_model.pth)    — 1D 卷积 + KAN 管道
+    9. KAN-Attention  (kan_attn_model.pth)    — 注意力池化 KAN
+   10. MultiScale-KAN (multiscale_kan_model.pth) — 多尺度并行 KAN
+   11. GatedKAN       (gated_kan_model.pth)   — 门控双路径 KAN
 
-性能优化说明:
-  - 每个模型的 checkpoint 只从磁盘加载一次（原来每个 SNR 点都重复加载）
-  - 去掉 ThreadPoolExecutor：GIL 使线程无法真正并行 CPU 推理，改为串行循环
-  - run_inference 改为在设备上拼接 tensor 后一次性 .cpu()，避免逐 batch PCIe 传输
-  - 使用 torch.inference_mode() 代替 no_grad()，节省梯度追踪开销
-  - BATCH_SIZE 增大以减少 kernel 启动次数；GPU 时启用 pin_memory
+运行方式:
+  python compare_all_equalizers.py                     # 测试全部可用模型
+  python compare_all_equalizers.py --models FCNN DNN   # 仅测试指定模型
+  python compare_all_equalizers.py --list              # 列出所有可用 tag
 
-CPU 多核并行说明 (FORCE_CPU 开关):
-  - 打开 FORCE_CPU=True 后，强制全程使用 CPU，并用 ProcessPoolExecutor 实现
-    真正的多进程并行（绕过 GIL），每个进程独立负责一个模型的全部 SNR 测试
-  - CPU_WORKERS 控制并行进程数，默认取 os.cpu_count()（您的机器为 8 核）
-  - 每个子进程内调用 torch.set_num_threads(1)，防止多进程 × 多线程的过度订阅
-    （例如 8 进程×8线程 = 64 线程争用，反而更慢）
+增量 CSV:
+  仅覆盖本次测试的模型列，保留 CSV 中已有的其他模型结果。
 """
 
 import os
+import sys
+import argparse
 import torch
 import scipy.io
 import numpy as np
@@ -37,6 +38,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import logging
 import csv
+from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from torch.utils.data import DataLoader
 from pathlib import Path
@@ -77,26 +79,30 @@ from train_bilstm import (
 )
 from train_kan_ideas import (
     KANLinear,
+    VanillaKANEqualizer,
     KANFCNNEqualizer,
     HybridKANEqualizer,
     ResKANEqualizer,
-    build_kan_fcnn,  KAN_FCNN_CONFIG,
-    build_hybrid_kan, HYBRID_KAN_CONFIG,
-    build_res_kan,   RES_KAN_CONFIG,
+    ConvKANEqualizer,
+    KANAttentionEqualizer,
+    MultiScaleKANEqualizer,
+    GatedKANEqualizer,
+    build_vanilla_kan,    VANILLA_KAN_CONFIG,
+    build_kan_fcnn,       KAN_FCNN_CONFIG,
+    build_hybrid_kan,     HYBRID_KAN_CONFIG,
+    build_res_kan,        RES_KAN_CONFIG,
+    build_conv_kan,       CONV_KAN_CONFIG,
+    build_kan_attention,  KAN_ATTN_CONFIG,
+    build_multiscale_kan, MULTISCALE_KAN_CONFIG,
+    build_gated_kan,      GATED_KAN_CONFIG,
 )
 
 # ================= 全局配置 =================
 SNR_LIST    = [0, 5, 10, 15, 20, 25, None]
 LABEL_SCALE = 3.0
-BATCH_SIZE  = 4096  # 增大 batch 减少 kernel 启动次数
+BATCH_SIZE  = 4096
 
-# ----- CPU 多核并行开关 -----
-# True : 强制使用 CPU，并用 ProcessPoolExecutor 多进程并行（每个进程负责一个模型）
-# False: 自动选择设备（优先 GPU），串行逐模型推理
 FORCE_CPU = True
-
-# 并行进程数。None 表示自动取 os.cpu_count()（通常等于逻辑核心数）
-# 您的机器有 8 核，可设为 8 或更小的值；设为 1 退化为单进程 CPU 串行
 CPU_WORKERS = None
 
 
@@ -143,7 +149,6 @@ def calculate_ber(pred_scaled, true_scaled):
 
 
 def run_inference(model, loader, device):
-    """在设备上完成所有 batch 推理后，统一转 CPU，避免逐 batch PCIe 传输。"""
     preds_list, targets_list = [], []
     with torch.inference_mode():
         for inputs, tgt in loader:
@@ -211,6 +216,14 @@ MODEL_REGISTRY = [
     },
     # --- KAN 变体 ---
     {
+        'name': 'VanillaKAN', 'tag': 'VanKAN',
+        'ckpt': 'vanilla_kan_model.pth',
+        'build_fn': build_vanilla_kan,
+        'default_config': dict(VANILLA_KAN_CONFIG),
+        'color': 'C9', 'marker': 'P', 'ls': '-',
+        'group': 'kan',
+    },
+    {
         'name': 'KAN-FCNN', 'tag': 'KANFCNN',
         'ckpt': 'kan_fcnn_model.pth',
         'build_fn': build_kan_fcnn,
@@ -234,25 +247,49 @@ MODEL_REGISTRY = [
         'color': 'C6', 'marker': 'p', 'ls': '-',
         'group': 'kan',
     },
+    {
+        'name': 'ConvKAN', 'tag': 'ConvKAN',
+        'ckpt': 'conv_kan_model.pth',
+        'build_fn': build_conv_kan,
+        'default_config': dict(CONV_KAN_CONFIG),
+        'color': 'C7', 'marker': 'H', 'ls': '-',
+        'group': 'kan',
+    },
+    {
+        'name': 'KAN-Attention', 'tag': 'KANAttn',
+        'ckpt': 'kan_attn_model.pth',
+        'build_fn': build_kan_attention,
+        'default_config': dict(KAN_ATTN_CONFIG),
+        'color': 'C8', 'marker': '*', 'ls': '-',
+        'group': 'kan',
+    },
+    {
+        'name': 'MultiScale-KAN', 'tag': 'MSKAN',
+        'ckpt': 'multiscale_kan_model.pth',
+        'build_fn': build_multiscale_kan,
+        'default_config': dict(MULTISCALE_KAN_CONFIG),
+        'color': 'tab:brown', 'marker': 'd', 'ls': '-',
+        'group': 'kan',
+    },
+    {
+        'name': 'GatedKAN', 'tag': 'GatedKAN',
+        'ckpt': 'gated_kan_model.pth',
+        'build_fn': build_gated_kan,
+        'default_config': dict(GATED_KAN_CONFIG),
+        'color': 'tab:pink', 'marker': 'h', 'ls': '-',
+        'group': 'kan',
+    },
 ]
+
+_TAG_TO_ENTRY = {e['tag']: e for e in MODEL_REGISTRY}
+_NAME_TO_ENTRY = {e['name']: e for e in MODEL_REGISTRY}
 
 
 # ================= CPU 多进程工作函数 =================
-# 必须定义在模块顶层，才能在 Windows spawn 模式下被 pickle 序列化。
-# 每个子进程独立负责一个模型的全部 SNR 推理，避免重复加载 checkpoint。
 def _model_worker(task_args):
-    """
-    子进程任务：加载一个模型，遍历所有 SNR 点，返回该模型的 BER 字典。
-
-    设计要点:
-      - torch.set_num_threads(1): 防止 N进程 × M线程 的过度订阅。
-        每个进程独占一个核，PyTorch 内部 BLAS 也只用单线程。
-      - 模型在子进程内仅加载一次，然后复用到所有 SNR 点。
-    """
     (tag, build_fn, config, ckpt_path_str,
      snr_list, rx_test_base, symb_test, rx_mean, rx_std) = task_args
 
-    # 限制每个子进程只使用 1 个 OpenMP/MKL 线程，防止过度订阅
     torch.set_num_threads(1)
 
     model = build_fn(config, 'cpu')
@@ -279,8 +316,73 @@ def _model_worker(task_args):
     return tag, model_results
 
 
+# ================= 增量 CSV 读写 =================
+def load_existing_csv(csv_path):
+    """读取已有 CSV，返回 {snr_label: {model_name: ber}} 的嵌套字典。"""
+    existing = OrderedDict()
+    existing_cols = []
+    if not csv_path.exists():
+        return existing, existing_cols
+
+    with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or 'SNR' not in reader.fieldnames:
+            return existing, existing_cols
+        existing_cols = [c for c in reader.fieldnames if c != 'SNR']
+        for row in reader:
+            snr_key = row.get('SNR', '')
+            if not snr_key:
+                continue
+            existing[snr_key] = {}
+            for col in existing_cols:
+                val = row.get(col, '')
+                if val and val.lower() != 'nan':
+                    try:
+                        existing[snr_key][col] = float(val)
+                    except ValueError:
+                        pass
+    return existing, existing_cols
+
+
+def save_merged_csv(csv_path, new_results, available_entries,
+                    external_results, log):
+    """将本次测试结果增量合并到已有 CSV 中。"""
+    existing, existing_cols = load_existing_csv(csv_path)
+
+    new_names = [e['name'] for e in available_entries]
+    all_names = list(OrderedDict.fromkeys(
+        existing_cols + new_names + list(external_results.keys())
+    ))
+
+    csv_rows = []
+    for snr in SNR_LIST:
+        snr_key = snr_label(snr)
+        row = {'SNR': snr_key}
+        old_row = existing.get(snr_key, {})
+        for name in all_names:
+            matched_entry = _NAME_TO_ENTRY.get(name)
+            if matched_entry and matched_entry['tag'] in new_results:
+                ber = new_results[matched_entry['tag']].get(snr, float('nan'))
+                row[name] = ber
+            elif name in external_results:
+                row[name] = external_results[name].get(snr_key, float('nan'))
+            elif name in old_row:
+                row[name] = old_row[name]
+            else:
+                row[name] = float('nan')
+        csv_rows.append(row)
+
+    fieldnames = ['SNR'] + all_names
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    log.info(f"\n[INFO] CSV 已保存 (增量合并): {csv_path}")
+    return all_names, csv_rows
+
+
 def load_external_classical_results(csv_path):
-    """从已有 CSV 读取外部生成的经典均衡器结果，避免被 Python 测试覆盖。"""
+    """从已有 CSV 读取外部生成的经典均衡器结果。"""
     external_results = {}
     if not csv_path.exists():
         return external_results
@@ -288,7 +390,9 @@ def load_external_classical_results(csv_path):
     with open(csv_path, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
-        external_names = [name for name in ('CMA', 'Volterra') if name in fieldnames]
+        registry_names = {e['name'] for e in MODEL_REGISTRY}
+        external_names = [name for name in fieldnames
+                          if name != 'SNR' and name not in registry_names]
         if not external_names:
             return external_results
 
@@ -312,12 +416,18 @@ def load_external_classical_results(csv_path):
 
 
 # ================= 主测试流程 =================
-def test():
+def test(model_tags=None):
+    """
+    model_tags: 要测试的 tag 列表。None 表示测试全部可用模型。
+    """
     log, log_path = setup_logger()
 
     log.info("=" * 80)
-    log.info("   六种均衡器综合对比 — BER vs SNR")
-    log.info("   (FCNN / DNN / BiLSTM / KAN-FCNN / Hybrid-KAN / ResKAN)")
+    log.info("   均衡器综合对比 — BER vs SNR")
+    if model_tags:
+        log.info(f"   指定模型: {model_tags}")
+    else:
+        log.info("   模式: 测试全部可用模型")
     log.info("=" * 80)
 
     if FORCE_CPU:
@@ -330,18 +440,23 @@ def test():
         log.info(f"[INFO] 运行模式: 自动设备串行（FORCE_CPU=False）")
         log.info(f"[INFO] 运行设备: {_device}")
 
-    for entry in MODEL_REGISTRY:
+    # ---------- 筛选注册表 ----------
+    if model_tags:
+        candidates = [e for e in MODEL_REGISTRY if e['tag'] in model_tags]
+    else:
+        candidates = list(MODEL_REGISTRY)
+
+    for entry in candidates:
         entry['default_config']['device'] = _device
 
-    # ---------- 检查可用模型 ----------
     available = []
-    for entry in MODEL_REGISTRY:
+    for entry in candidates:
         ckpt_path = MODELS_DIR / entry['ckpt']
         if ckpt_path.exists():
             available.append(entry)
-            log.info(f"  [OK] {entry['name']:15s}  ← {entry['ckpt']}")
+            log.info(f"  [OK] {entry['name']:17s}  ← {entry['ckpt']}")
         else:
-            log.info(f"  [--] {entry['name']:15s}  ← 未找到 {entry['ckpt']}，跳过")
+            log.info(f"  [--] {entry['name']:17s}  ← 未找到 {entry['ckpt']}，跳过")
 
     if not available:
         log.info("\n[ERROR] 没有找到任何模型 checkpoint。")
@@ -360,8 +475,8 @@ def test():
     log.info(f"\n[INFO] 测试信号点数: {len(rx_test_base):,}")
     log.info(f"[INFO] 测试符号数:   {len(symb_test):,}")
 
-    # ---------- 加载所有模型（主进程，用于参数量统计和归一化参数读取）----------
-    log.info("\n[INFO] 正在加载模型 checkpoint（主进程，仅用于参数统计）...")
+    # ---------- 加载模型 checkpoint ----------
+    log.info("\n[INFO] 正在加载模型 checkpoint...")
     loaded_models = {}
     for entry in available:
         ckpt_path = MODELS_DIR / entry['ckpt']
@@ -377,7 +492,6 @@ def test():
             entry['default_config'].update(saved_config)
         entry['default_config']['device'] = _device
 
-        # 主进程只需加载模型用于参数量统计，不用于推理（推理在子进程中完成）
         model = entry['build_fn'](entry['default_config'], 'cpu')
         model.load_state_dict(ckpt['model_state_dict'])
         model.eval()
@@ -389,11 +503,11 @@ def test():
             'epoch':    epoch,
             'best_ber': best_ber,
         }
-        log.info(f"  {entry['name']:15s} — Epoch {epoch}, "
+        log.info(f"  {entry['name']:17s} — Epoch {epoch}, "
                  f"训练 Val BER={best_ber}, "
                  f"mean={rx_mean:.4f}, std={rx_std:.4f}")
 
-    # ---------- 参数量统计（复用主进程已加载的模型）----------
+    # ---------- 参数量统计 ----------
     log.info("\n" + "=" * 72)
     log.info("                    模型参数量对比")
     log.info("=" * 72)
@@ -407,23 +521,20 @@ def test():
     log.info("=" * 72)
 
     log.info(f"\n[INFO] 测试 SNR: {[snr_label(s) for s in SNR_LIST]}")
-    log.info(f"[INFO] 可用模型: {len(available)}")
+    log.info(f"[INFO] 本次测试模型数: {len(available)}")
     log.info(f"[INFO] batch 大小: {BATCH_SIZE}\n")
 
     csv_path = ROOT / 'all_equalizer_comparison.csv'
     external_results = load_external_classical_results(csv_path)
     if external_results:
-        log.info(f"[INFO] 检测到外部经典均衡器结果，将从已有 CSV 保留: {list(external_results)}")
+        log.info(f"[INFO] 检测到外部经典均衡器结果，将保留: {list(external_results)}")
 
-    # ---------- 推理：根据 FORCE_CPU 选择并行或串行路径 ----------
+    # ---------- 推理 ----------
     results = {entry['tag']: {} for entry in available}
 
     if FORCE_CPU:
-        # ===== CPU 多进程并行路径 =====
-        # 每个子进程负责一个模型的所有 SNR 点，进程间真正并行（无 GIL）。
-        # 注意：rx_test_base 和 symb_test 通过 pickle 传给每个子进程（一次性开销）。
         actual_workers = min(n_workers, len(available))
-        log.info(f"[INFO] 启动 {actual_workers} 个子进程（共 {len(available)} 个模型任务）...\n")
+        log.info(f"[INFO] 启动 {actual_workers} 个子进程...\n")
 
         task_list = []
         for entry in available:
@@ -452,7 +563,6 @@ def test():
                 try:
                     _, model_results = future.result()
                     results[tag] = model_results
-                    # 按 SNR 顺序打印该模型的所有结果
                     for snr in SNR_LIST:
                         ber = model_results.get(snr, float('nan'))
                         log.info(f"  [{tag:8s}] SNR={snr_label(snr):8s}  →  BER = {ber:.4e}")
@@ -460,8 +570,6 @@ def test():
                     log.error(f"  [{tag:8s}] 子进程推理失败: {exc}")
 
     else:
-        # ===== GPU/CPU 串行路径 =====
-        # 模型在主进程中复用，无需重复加载 checkpoint。
         pin_mem = (_device != 'cpu')
         for entry in available:
             info    = loaded_models[entry['tag']]
@@ -487,68 +595,75 @@ def test():
                 results[entry['tag']][snr] = ber
                 log.info(f"  [{entry['tag']:8s}] SNR={snr_label(snr):8s}  →  BER = {ber:.4e}")
 
-    # ---------- 汇总表格 ----------
-    names = [e['name'] for e in available] + list(external_results.keys())
+    # ---------- 增量合并 CSV ----------
+    all_names, csv_rows = save_merged_csv(
+        csv_path, results, available, external_results, log
+    )
 
-    col_width = max(16, max(len(n) for n in names) + 4)
-    sep_len   = 14 + col_width * len(names)
+    # ---------- 汇总表格 ----------
+    col_width = max(16, max(len(n) for n in all_names) + 4)
+    sep_len   = 14 + col_width * len(all_names)
 
     log.info("\n" + "=" * sep_len)
     log.info("         BER 对比汇总（PAM4 硬判决，门限 -2 / 0 / 2）")
     log.info("=" * sep_len)
 
     header = f"{'SNR':^12} |"
-    for n in names:
+    for n in all_names:
         header += f" {n:^{col_width - 2}} |"
     log.info(header)
     log.info("-" * len(header))
 
-    csv_rows = []
-    for snr in SNR_LIST:
-        row_str = f"{snr_label(snr):^12} |"
-        csv_row = {'SNR': snr_label(snr)}
-        for entry in available:
-            ber = results[entry['tag']].get(snr, float('nan'))
-            row_str += f" {ber:^{col_width - 2}.4e} |"
-            csv_row[entry['name']] = ber
-        for name, values in external_results.items():
-            ber = values.get(snr_label(snr), float('nan'))
-            row_str += f" {ber:^{col_width - 2}.4e} |"
-            csv_row[name] = ber
+    for row in csv_rows:
+        row_str = f"{row['SNR']:^12} |"
+        for n in all_names:
+            v = row.get(n, float('nan'))
+            try:
+                row_str += f" {float(v):^{col_width - 2}.4e} |"
+            except (ValueError, TypeError):
+                row_str += f" {'N/A':^{col_width - 2}} |"
         log.info(row_str)
-        csv_rows.append(csv_row)
 
     log.info("=" * len(header))
 
-    # ---------- 保存 CSV ----------
-    csv_path = ROOT / 'all_equalizer_comparison.csv'
-    fieldnames = ['SNR'] + names
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(csv_rows)
-    log.info(f"\n[INFO] CSV 已保存: {csv_path}")
-
-    # ---------- 绘图 ----------
+    # ---------- 绘图（使用 CSV 中全部数据）----------
+    existing_data, existing_cols = load_existing_csv(csv_path)
     x_labels = [snr_label(s) for s in SNR_LIST]
     x_pos    = np.arange(len(x_labels))
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    for entry in available:
-        bers = [results[entry['tag']].get(s, np.nan) for s in SNR_LIST]
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    for entry in MODEL_REGISTRY:
+        col_name = entry['name']
+        if col_name not in existing_cols and col_name not in all_names:
+            continue
+        bers = []
+        for snr_key in x_labels:
+            row_data = existing_data.get(snr_key, {})
+            bers.append(row_data.get(col_name, np.nan))
+        if all(np.isnan(b) for b in bers):
+            continue
         ax.semilogy(
             x_pos, bers,
             marker=entry['marker'], linestyle=entry['ls'],
             linewidth=2, markersize=8,
             color=entry['color'], label=entry['name'],
         )
+
     external_styles = {
         'CMA': {'color': 'C5', 'marker': 'X', 'ls': ':'},
-        'Volterra': {'color': 'C9', 'marker': 'P', 'ls': ':'},
+        'Volterra': {'color': 'tab:olive', 'marker': 'P', 'ls': ':'},
     }
-    for name, values in external_results.items():
+    for name in existing_cols:
+        if name in _NAME_TO_ENTRY or name == 'SNR':
+            continue
         style = external_styles.get(name, {'color': None, 'marker': 'o', 'ls': ':'})
-        bers = [values.get(s, np.nan) for s in x_labels]
+        bers = []
+        for snr_key in x_labels:
+            row_data = existing_data.get(snr_key, {})
+            bers.append(row_data.get(name, np.nan))
+        if all(np.isnan(b) for b in bers):
+            continue
         ax.semilogy(
             x_pos, bers,
             marker=style['marker'], linestyle=style['ls'],
@@ -561,7 +676,7 @@ def test():
     ax.set_xlabel('SNR (dB)', fontsize=12)
     ax.set_ylabel('BER', fontsize=12)
     ax.set_title('IM/DD PAM4 均衡器全面对比 — BER vs SNR', fontsize=14)
-    ax.legend(fontsize=9, loc='upper right', ncol=2)
+    ax.legend(fontsize=8, loc='upper right', ncol=2)
     ax.grid(True, which='both', linestyle='--', alpha=0.6)
 
     plt.tight_layout()
@@ -572,7 +687,38 @@ def test():
     log.info(f"[INFO] 日志已保存:   {log_path}")
 
 
-# Windows 的 spawn 模式要求多进程程序必须在此守卫下启动，
-# 否则子进程会反复执行顶层代码导致递归创建进程。
 if __name__ == '__main__':
-    test()
+    parser = argparse.ArgumentParser(
+        description='均衡器综合对比 — BER vs SNR',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='示例:\n'
+               '  python compare_all_equalizers.py                    # 全部\n'
+               '  python compare_all_equalizers.py --models FCNN DNN  # 指定 tag\n'
+               '  python compare_all_equalizers.py --list             # 列出 tag',
+    )
+    parser.add_argument('--models', nargs='+', metavar='TAG',
+                        help='仅测试指定 tag 的模型 (可多个)')
+    parser.add_argument('--list', action='store_true',
+                        help='列出所有可用模型 tag 后退出')
+    args = parser.parse_args()
+
+    if args.list:
+        print("可用模型 tag:")
+        for e in MODEL_REGISTRY:
+            ckpt_path = MODELS_DIR / e['ckpt']
+            status = "✓" if ckpt_path.exists() else "✗"
+            print(f"  {status}  {e['tag']:12s}  ({e['name']})  ← {e['ckpt']}")
+        sys.exit(0)
+
+    tags = None
+    if args.models:
+        valid_tags = {e['tag'] for e in MODEL_REGISTRY}
+        tags = [t for t in args.models if t in valid_tags]
+        invalid = [t for t in args.models if t not in valid_tags]
+        if invalid:
+            print(f"[警告] 未知 tag 已忽略: {invalid}")
+            print(f"       可用: {sorted(valid_tags)}")
+        if not tags:
+            sys.exit(1)
+
+    test(model_tags=tags)

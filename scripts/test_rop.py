@@ -1,24 +1,20 @@
 """
 ROP 泛化实验 — 测试脚本（CPU 多进程并行版）
 
-加载由 train_all_rop.py 训练好的六种均衡器，在 ROP=0~-15 dBm 数据上并行推理，
-将 BER 结果保存到 ROP测试数据/ 文件夹（CSV + 图）。
+加载由 train_all_rop.py 训练好的均衡器，在 ROP=0~-15 dBm 数据上并行推理，
+将 BER 结果增量保存到 ROP测试数据/ 文件夹（CSV + 图）。
 
-并行策略（绕过 GIL 的多进程，适合 8 核 CPU）:
-  - 每个子进程负责一个模型的全部 ROP 点推理
-  - 进程数 = min(CPU_WORKERS, 可用模型数)，默认取 os.cpu_count()=8
-  - 每进程内 torch.set_num_threads(1)，防止 8进程×8线程=64线程争抢
+运行方式:
+  python test_rop.py                                    # 测试全部可用模型
+  python test_rop.py --models VanillaKAN KAN-FCNN       # 仅测试指定模型
+  python test_rop.py --list                             # 列出可用模型名
+  python test_rop.py --plot-only                        # 不测试，只用 CSV 重绘图
 
-图表规格:
-  - 1:1 正方形 (6 in × 6 in)
-  - Times New Roman 字体，14 pt
-  - BER vs ROP（半对数，y 轴对数刻度）
-
-运行前请先:
-  1. 运行 RX_rop.m          ← 生成各 ROP 的 .mat 测试文件
-  2. 运行 train_all_rop.py  ← 在 ROP=0 数据上训练所有模型
+增量 CSV:
+  仅覆盖本次测试的模型列，保留 CSV 中已有的其他模型结果。
 """
 
+import argparse
 import os
 import csv
 import sys
@@ -27,6 +23,7 @@ import torch
 import scipy.io
 import matplotlib
 import matplotlib.pyplot as plt
+from collections import OrderedDict
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from torch.utils.data import DataLoader
@@ -36,9 +33,14 @@ from train_fcnn    import FCNNEqualizer,   OpticalDataset, CONFIG as FCNN_CFG
 from train_dnn     import DNNEqualizer,    CONFIG as DNN_CFG
 from train_bilstm  import BiLSTMEqualizer, CONFIG as BILSTM_CFG
 from train_kan_ideas import (
-    build_kan_fcnn,   KAN_FCNN_CONFIG,
-    build_hybrid_kan, HYBRID_KAN_CONFIG,
-    build_res_kan,    RES_KAN_CONFIG,
+    build_vanilla_kan,    VANILLA_KAN_CONFIG,
+    build_kan_fcnn,       KAN_FCNN_CONFIG,
+    build_hybrid_kan,     HYBRID_KAN_CONFIG,
+    build_res_kan,        RES_KAN_CONFIG,
+    build_conv_kan,       CONV_KAN_CONFIG,
+    build_kan_attention,  KAN_ATTN_CONFIG,
+    build_multiscale_kan, MULTISCALE_KAN_CONFIG,
+    build_gated_kan,      GATED_KAN_CONFIG,
 )
 
 ROOT       = Path(__file__).parent.parent
@@ -49,7 +51,9 @@ ROP_DIR.mkdir(exist_ok=True)
 ROP_LIST    = list(range(0, -16, -1))   # 0, -1, -2, ..., -15
 LABEL_SCALE = 3.0
 BATCH_SIZE  = 4096
-CPU_WORKERS = None   # None → 自动取 os.cpu_count()（您的机器为 8 核）
+CPU_WORKERS = None
+
+ROP_PLOT_ROPS = [-9, -10, -11, -12, -13, -14, -15]
 
 
 def get_device():
@@ -63,7 +67,7 @@ def get_device():
 DEVICE = get_device()
 
 
-# ================= 模型构建函数（主进程 & 子进程均可调用）=================
+# ================= 模型构建函数 =================
 def _build_fcnn(config):
     return FCNNEqualizer(
         input_dim   = config['window_size'],
@@ -90,6 +94,10 @@ def _build_bilstm(config):
     ).to('cpu')
 
 
+def _build_vanilla_kan(config):
+    return build_vanilla_kan(config, 'cpu')
+
+
 def _build_kan_fcnn(config):
     return build_kan_fcnn(config, 'cpu')
 
@@ -100,6 +108,22 @@ def _build_hybrid_kan(config):
 
 def _build_res_kan(config):
     return build_res_kan(config, 'cpu')
+
+
+def _build_conv_kan(config):
+    return build_conv_kan(config, 'cpu')
+
+
+def _build_kan_attn(config):
+    return build_kan_attention(config, 'cpu')
+
+
+def _build_multiscale_kan(config):
+    return build_multiscale_kan(config, 'cpu')
+
+
+def _build_gated_kan(config):
+    return build_gated_kan(config, 'cpu')
 
 
 # ================= 模型注册表 =================
@@ -123,6 +147,12 @@ MODEL_REGISTRY = [
         'color': 'C3', 'marker': 'D', 'ls': ':',
     },
     {
+        'name': 'VanillaKAN', 'build': _build_vanilla_kan,
+        'default_cfg': dict(VANILLA_KAN_CONFIG),
+        'ckpt': 'vanilla_kan_rop_model.pth',
+        'color': 'C9', 'marker': 'P', 'ls': '-',
+    },
+    {
         'name': 'KAN-FCNN',   'build': _build_kan_fcnn,
         'default_cfg': dict(KAN_FCNN_CONFIG),
         'ckpt': 'kan_fcnn_rop_model.pth',
@@ -140,22 +170,178 @@ MODEL_REGISTRY = [
         'ckpt': 'res_kan_rop_model.pth',
         'color': 'C6', 'marker': 'p', 'ls': '-',
     },
+    {
+        'name': 'ConvKAN',    'build': _build_conv_kan,
+        'default_cfg': dict(CONV_KAN_CONFIG),
+        'ckpt': 'conv_kan_rop_model.pth',
+        'color': 'C7', 'marker': 'H', 'ls': '-',
+    },
+    {
+        'name': 'KAN-Attention', 'build': _build_kan_attn,
+        'default_cfg': dict(KAN_ATTN_CONFIG),
+        'ckpt': 'kan_attn_rop_model.pth',
+        'color': 'C8', 'marker': '*', 'ls': '-',
+    },
+    {
+        'name': 'MultiScale-KAN', 'build': _build_multiscale_kan,
+        'default_cfg': dict(MULTISCALE_KAN_CONFIG),
+        'ckpt': 'multiscale_kan_rop_model.pth',
+        'color': 'tab:brown', 'marker': 'd', 'ls': '-',
+    },
+    {
+        'name': 'GatedKAN',   'build': _build_gated_kan,
+        'default_cfg': dict(GATED_KAN_CONFIG),
+        'ckpt': 'gated_kan_rop_model.pth',
+        'color': 'tab:pink', 'marker': 'h', 'ls': '-',
+    },
+]
+
+_NAME_TO_ENTRY = {e['name']: e for e in MODEL_REGISTRY}
+_FALLBACK_STYLE = [
+    ('C5', 'x', '--'), ('tab:olive', '+', ':'), ('tab:cyan', '1', '-.'),
+    ('tab:gray', '2', '-'), ('tab:orange', '3', '--'),
 ]
 
 
-# ================= 子进程工作函数（必须在模块顶层，Windows spawn 可 pickle）=================
+# ================= 增量 CSV 读写 =================
+def load_existing_csv(csv_path):
+    """读取已有 CSV，返回 {rop_int: {model_name: ber}} 和列名列表。"""
+    existing = OrderedDict()
+    existing_cols = []
+    if not csv_path.exists():
+        return existing, existing_cols
+
+    with open(csv_path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or 'ROP(dBm)' not in reader.fieldnames:
+            return existing, existing_cols
+        existing_cols = [c for c in reader.fieldnames if c != 'ROP(dBm)']
+        for row in reader:
+            raw = (row.get('ROP(dBm)') or '').strip()
+            if not raw:
+                continue
+            rop = int(float(raw))
+            existing[rop] = {}
+            for col in existing_cols:
+                val = row.get(col, '')
+                if val and val.lower() != 'nan':
+                    try:
+                        existing[rop][col] = float(val)
+                    except ValueError:
+                        pass
+    return existing, existing_cols
+
+
+def save_merged_csv(csv_path, new_results, rop_tested):
+    """将本次测试结果增量合并到已有 CSV 中。"""
+    existing, existing_cols = load_existing_csv(csv_path)
+
+    new_names = list(new_results.keys())
+    all_names = list(OrderedDict.fromkeys(existing_cols + new_names))
+    all_rops = sorted(set(list(existing.keys()) + rop_tested), reverse=True)
+
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=['ROP(dBm)'] + all_names)
+        writer.writeheader()
+        for rop in all_rops:
+            row = {'ROP(dBm)': rop}
+            old_row = existing.get(rop, {})
+            for name in all_names:
+                if name in new_results and rop in new_results[name]:
+                    row[name] = new_results[name][rop]
+                elif name in old_row:
+                    row[name] = old_row[name]
+                else:
+                    row[name] = float('nan')
+            writer.writerow(row)
+    print(f"\nCSV 已保存 (增量合并): {csv_path}")
+    return all_names, all_rops
+
+
+def _entries_for_column_names(names):
+    out = []
+    for i, n in enumerate(names):
+        if n in _NAME_TO_ENTRY:
+            out.append(_NAME_TO_ENTRY[n])
+        else:
+            c, m, ls = _FALLBACK_STYLE[i % len(_FALLBACK_STYLE)]
+            out.append({'name': n, 'color': c, 'marker': m, 'ls': ls})
+    return out
+
+
+def _resolve_rop_for_plot(rop_tested, valid_rops):
+    valid = set(valid_rops)
+    if ROP_PLOT_ROPS is None:
+        return list(rop_tested)
+    rop_for_plot = []
+    for r in ROP_PLOT_ROPS:
+        if r in valid:
+            rop_for_plot.append(r)
+        else:
+            print(f"  [绘图跳过] ROP={r} dBm：不在有效 ROP 集合中")
+    if not rop_for_plot:
+        print("  [警告] ROP_PLOT_ROPS 与有效数据无交集，绘图改用全部 ROP。")
+        return list(rop_tested)
+    print(f"\n[INFO] 绘图仅使用 ROP = {rop_for_plot}（共 {len(rop_for_plot)} 点）")
+    return rop_for_plot
+
+
+def _render_rop_plot(csv_path, rop_for_plot, fig_path):
+    """从 CSV 读取全部数据后绘图，保证图中包含历史数据。"""
+    existing, existing_cols = load_existing_csv(csv_path)
+    if not existing_cols:
+        print("[警告] CSV 为空，无法绘图。")
+        return
+
+    matplotlib.rcParams.update({
+        'font.family':     'Times New Roman',
+        'font.size':       14,
+        'axes.titlesize':  14,
+        'axes.labelsize':  14,
+        'xtick.labelsize': 14,
+        'ytick.labelsize': 14,
+        'legend.fontsize': 10,
+        'axes.unicode_minus': False,
+    })
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    entries = _entries_for_column_names(existing_cols)
+
+    for entry in entries:
+        name = entry['name']
+        bers = [existing.get(rop, {}).get(name, float('nan')) for rop in rop_for_plot]
+        if all(np.isnan(b) for b in bers):
+            continue
+        ax.semilogy(
+            rop_for_plot, bers,
+            marker     = entry['marker'],
+            linestyle  = entry['ls'],
+            color      = entry['color'],
+            linewidth  = 1.5,
+            markersize = 7,
+            label      = name,
+        )
+
+    ax.set_xlabel('Received Optical Power (dBm)')
+    ax.set_ylabel('Bit Error Rate (BER)')
+    ax.set_title('BER vs. Received Optical Power')
+    ax.set_xticks(rop_for_plot)
+    ax.invert_xaxis()
+    ax.legend(loc='upper right', framealpha=0.8, ncol=2)
+    ax.grid(True, which='both', linestyle='--', alpha=0.5)
+
+    plt.tight_layout()
+    plt.savefig(str(fig_path), dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"图表已保存: {fig_path}")
+
+
+# ================= 子进程工作函数 =================
 def _worker(args):
-    """
-    每个子进程负责一个模型的全部 ROP 点推理。
-    args: (name, build_fn, config, ckpt_path_str, rop_data_paths, rx_mean, rx_std)
-    返回: (name, {rop: ber})
-    """
     name, build_fn, config, ckpt_path_str, rop_data_paths, rx_mean, rx_std = args
 
-    # 限制每个子进程的 PyTorch 内部线程数，防止过度订阅
     torch.set_num_threads(1)
 
-    # 加载模型（每个子进程只加载一次）
     ckpt  = torch.load(ckpt_path_str, weights_only=False, map_location='cpu')
     model = build_fn(config)
     model.load_state_dict(ckpt['model_state_dict'])
@@ -193,15 +379,36 @@ def _worker(args):
 
 
 # ================= 主流程 =================
-def main():
+def main(plot_only=False, model_names=None):
+    csv_path = ROP_DIR / 'rop_ber_comparison.csv'
+    fig_path = ROP_DIR / 'rop_ber_comparison.png'
+
+    if plot_only:
+        print("=" * 65)
+        print("  ROP — 仅绘图（从 CSV 读取，不运行推理）")
+        print("=" * 65)
+        if not csv_path.exists():
+            print(f"\n未找到 {csv_path}，请先完整运行一次测试或放置 CSV。")
+            sys.exit(1)
+        existing, existing_cols = load_existing_csv(csv_path)
+        if not existing:
+            print("\nCSV 中没有有效数据。")
+            sys.exit(1)
+        all_rops = sorted(existing.keys(), reverse=True)
+        rop_for_plot = _resolve_rop_for_plot(all_rops, set(all_rops))
+        _render_rop_plot(csv_path, rop_for_plot, fig_path)
+        return
+
     n_workers = CPU_WORKERS or os.cpu_count() or 1
 
     print("=" * 65)
     print("  ROP 泛化实验 — 多进程并行测试")
     print(f"  逻辑核心数: {os.cpu_count()}  并行进程数: {n_workers}")
+    if model_names:
+        print(f"  指定模型: {model_names}")
     print("=" * 65)
 
-    # ── 确认数据文件 & 构建 rop_data_paths ──
+    # ── 确认数据文件 ──
     rop_data_paths = {}
     for rop in ROP_LIST:
         if rop == 0:
@@ -219,12 +426,18 @@ def main():
         print("\n没有可用的 ROP 测试数据，请先运行 RX_rop.m。")
         sys.exit(1)
 
-    rop_tested = sorted(rop_data_paths.keys(), reverse=True)   # 0, -1, ..., -15
+    rop_tested = sorted(rop_data_paths.keys(), reverse=True)
 
-    # ── 确认模型 checkpoint & 构建任务列表 ──
+    # ── 筛选注册表 ──
+    if model_names:
+        candidates = [e for e in MODEL_REGISTRY if e['name'] in model_names]
+    else:
+        candidates = list(MODEL_REGISTRY)
+
+    # ── 确认模型 checkpoint ──
     task_list = []
     available_entries = []
-    for entry in MODEL_REGISTRY:
+    for entry in candidates:
         ckpt_path = MODELS_DIR / entry['ckpt']
         if not ckpt_path.exists():
             print(f"  [跳过] {entry['name']}: {entry['ckpt']} 不存在")
@@ -238,7 +451,7 @@ def main():
 
         rx_mean = float(ckpt['rx_mean'])
         rx_std  = float(ckpt['rx_std'])
-        print(f"  [OK]   {entry['name']} 已加载  (mean={rx_mean:.4f}, std={rx_std:.4f})")
+        print(f"  [OK]   {entry['name']:17s} 已加载  (mean={rx_mean:.4f}, std={rx_std:.4f})")
 
         task_list.append((
             entry['name'],
@@ -259,7 +472,7 @@ def main():
     actual_workers = min(n_workers, len(task_list))
     print(f"\n[INFO] 启动 {actual_workers} 个子进程（共 {len(task_list)} 个模型任务）...\n")
 
-    results = {}
+    results = {}   # {name: {rop: ber}}
     with ProcessPoolExecutor(max_workers=actual_workers) as executor:
         future_to_name = {executor.submit(_worker, args): args[0] for args in task_list}
         for future in as_completed(future_to_name):
@@ -269,67 +482,55 @@ def main():
                 results[name] = model_results
                 for rop in rop_tested:
                     ber = model_results.get(rop, float('nan'))
-                    print(f"  [{name:12s}] ROP={rop:4d} dBm | BER = {ber:.4e}")
+                    print(f"  [{name:17s}] ROP={rop:4d} dBm | BER = {ber:.4e}")
             except Exception as exc:
-                print(f"  [{name:12s}] 子进程失败: {exc}")
+                print(f"  [{name:17s}] 子进程失败: {exc}")
 
-    # ── 保存 CSV ──
-    names    = [e['name'] for e in available_entries if e['name'] in results]
-    csv_path = ROP_DIR / 'rop_ber_comparison.csv'
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['ROP(dBm)'] + names)
-        writer.writeheader()
-        for rop in rop_tested:
-            row = {'ROP(dBm)': rop}
-            for name in names:
-                row[name] = results.get(name, {}).get(rop, float('nan'))
-            writer.writerow(row)
-    print(f"\nCSV 已保存: {csv_path}")
+    # ── 增量合并 CSV ──
+    save_merged_csv(csv_path, results, rop_tested)
 
     # ── 绘图 ──
-    matplotlib.rcParams.update({
-        'font.family':     'Times New Roman',
-        'font.size':       14,
-        'axes.titlesize':  14,
-        'axes.labelsize':  14,
-        'xtick.labelsize': 14,
-        'ytick.labelsize': 14,
-        'legend.fontsize': 12,
-        'axes.unicode_minus': False,
-    })
-
-    fig, ax = plt.subplots(figsize=(6, 6))   # 1:1 正方形
-
-    for entry in available_entries:
-        name = entry['name']
-        if name not in results:
-            continue
-        bers = [results[name].get(rop, float('nan')) for rop in rop_tested]
-        ax.semilogy(
-            rop_tested, bers,
-            marker    = entry['marker'],
-            linestyle = entry['ls'],
-            color     = entry['color'],
-            linewidth = 1.5,
-            markersize= 7,
-            label     = name,
-        )
-
-    ax.set_xlabel('Received Optical Power (dBm)')
-    ax.set_ylabel('Bit Error Rate (BER)')
-    ax.set_title('BER vs. Received Optical Power')
-    ax.set_xticks(rop_tested)
-    ax.invert_xaxis()                          # 0 dBm 在左，-15 dBm 在右
-    ax.legend(loc='upper right', framealpha=0.8)
-    ax.grid(True, which='both', linestyle='--', alpha=0.5)
-
-    plt.tight_layout()
-    fig_path = ROP_DIR / 'rop_ber_comparison.png'
-    plt.savefig(str(fig_path), dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"图表已保存: {fig_path}")
+    existing_data, _ = load_existing_csv(csv_path)
+    all_rops = sorted(existing_data.keys(), reverse=True)
+    rop_for_plot = _resolve_rop_for_plot(all_rops, set(rop_data_paths.keys()) | set(all_rops))
+    _render_rop_plot(csv_path, rop_for_plot, fig_path)
 
 
-# Windows spawn 模式要求多进程入口必须在此守卫下
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(
+        description='ROP 泛化实验 — 并行测试与 BER 曲线',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='示例:\n'
+               '  python test_rop.py                                   # 全部\n'
+               '  python test_rop.py --models VanillaKAN GatedKAN      # 指定\n'
+               '  python test_rop.py --list                            # 列出\n'
+               '  python test_rop.py --plot-only                       # 仅绘图',
+    )
+    parser.add_argument('--models', nargs='+', metavar='NAME',
+                        help='仅测试指定 name 的模型 (可多个)')
+    parser.add_argument('--list', action='store_true',
+                        help='列出所有可用模型名后退出')
+    parser.add_argument('--plot-only', action='store_true',
+                        help='不运行推理，仅根据已有 CSV 重新出图')
+    args = parser.parse_args()
+
+    if args.list:
+        print("可用模型 name:")
+        for e in MODEL_REGISTRY:
+            ckpt_path = MODELS_DIR / e['ckpt']
+            status = "✓" if ckpt_path.exists() else "✗"
+            print(f"  {status}  {e['name']:17s}  ← {e['ckpt']}")
+        sys.exit(0)
+
+    names = None
+    if args.models:
+        valid_names = {e['name'] for e in MODEL_REGISTRY}
+        names = [n for n in args.models if n in valid_names]
+        invalid = [n for n in args.models if n not in valid_names]
+        if invalid:
+            print(f"[警告] 未知模型名已忽略: {invalid}")
+            print(f"       可用: {sorted(valid_names)}")
+        if not names:
+            sys.exit(1)
+
+    main(plot_only=args.plot_only, model_names=names)

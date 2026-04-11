@@ -1,11 +1,16 @@
 """
 KAN 均衡器变体 — 训练脚本
 
-本脚本探索三种将 KAN 与前馈结构结合的方案：
+本脚本探索八种将 KAN 与各类神经网络结构结合的方案：
 
-  方案 1: KAN-FCNN   — 纯 KAN 前馈网络 (KANLinear 替代 Linear+ReLU)
-  方案 2: Hybrid-KAN — FCNN 前端线性特征提取 + KAN 后端非线性映射
-  方案 3: ResKAN     — FCNN 主路径 + KAN 残差校正分支
+  方案 0: VanillaKAN     — 纯 KAN 两层网络，不含任何辅助模块 (基准)
+  方案 1: KAN-FCNN       — 纯 KAN 前馈网络 (KANLinear 替代 Linear+ReLU)
+  方案 2: Hybrid-KAN     — FCNN 前端线性特征提取 + KAN 后端非线性映射
+  方案 3: ResKAN         — FCNN 主路径 + KAN 残差校正分支
+  方案 4: ConvKAN        — 1D 卷积前端局部 ISI 特征提取 + KAN 后端非线性回归
+  方案 5: KAN-Attention  — 注意力池化 KAN，动态加权输入窗口各采样点
+  方案 6: MultiScale-KAN — 多尺度并行 KAN，不同 B-样条分辨率自适应融合
+  方案 7: GatedKAN       — 门控双路径 KAN，自适应选择线性/非线性处理
 
 参数量对齐机制 (MATCH_PARAMS 开关):
   打开后，各模型自动微调隐层维度使总参数量对齐到 FCNN 基准。
@@ -13,10 +18,11 @@ KAN 均衡器变体 — 训练脚本
   grid_size, spline_order)，各模型的内部维度会自动跟随调整。
 
 运行方式:
-  python train_kan_ideas.py             # 顺序训练全部 3 个模型
-  python train_kan_ideas.py kan_fcnn    # 仅训练 KAN-FCNN
-  python train_kan_ideas.py hybrid_kan  # 仅训练 Hybrid-KAN
-  python train_kan_ideas.py res_kan     # 仅训练 ResKAN
+  python train_kan_ideas.py                    # 顺序训练全部 8 个模型
+  python train_kan_ideas.py vanilla_kan        # 仅训练 VanillaKAN
+  python train_kan_ideas.py conv_kan kan_attn  # 训练指定的多个模型
+  可用 key: vanilla_kan / kan_fcnn / hybrid_kan / res_kan / conv_kan /
+            kan_attn / multiscale_kan / gated_kan
 """
 
 import sys
@@ -257,11 +263,123 @@ def _tune_res_kan(target, W, F):
     return best
 
 
+def _tune_vanilla_kan(target, W, F):
+    """
+    搜索 VanillaKAN 的 kan_hidden 使参数量最接近 target。
+
+    参数公式:
+      KANLinear(W, h)  : W·h·F
+      KANLinear(h, 1)  : h·F
+      ──────────────────────────
+      Total = (W + 1)·h·F
+    """
+    best, best_diff = 8, float('inf')
+    for h in range(2, 128):
+        t = (W + 1) * h * F
+        d = abs(t - target)
+        if d < best_diff:
+            best_diff = d
+            best = h
+    return best
+
+
+def _tune_conv_kan(target, W, F, ks=5, po=4):
+    """
+    搜索 ConvKAN 的 (n_filters, kan_hidden) 使参数量最接近 target。
+
+    参数公式:
+      Conv1d(1, nf, ks)+b       : nf·ks + nf
+      Conv1d(nf, nf, ks)+b      : nf²·ks + nf
+      KANLinear(nf·po, kh)      : nf·po·kh·F
+      LayerNorm(kh)             : 2·kh
+      KANLinear(kh, 1)          : kh·F
+      ──────────────────────────
+      Total = nf·(ks+1) + nf²·ks + nf + kh·(nf·po·F + F + 2)
+    """
+    best, best_diff = (8, 8), float('inf')
+    for nf in range(4, 32):
+        for kh in range(2, 32):
+            t = nf * (ks + 1) + nf * nf * ks + nf + kh * (nf * po * F + F + 2)
+            d = abs(t - target)
+            if d < best_diff:
+                best_diff = d
+                best = (nf, kh)
+    return best
+
+
+def _tune_kan_attention(target, F):
+    """
+    搜索 KANAttention 的 d_model 使参数量最接近 target。
+
+    参数公式:
+      Linear(1, d)+b            : 2·d
+      KANLinear(d, 1) [attn]    : d·F
+      KANLinear(d, d) [feat]    : d²·F
+      KANLinear(d, 1) [out]     : d·F
+      ──────────────────────────
+      Total = d·(2 + 2·F) + d²·F
+    """
+    best, best_diff = 16, float('inf')
+    for d in range(4, 64):
+        t = d * (2 + 2 * F) + d * d * F
+        dd = abs(t - target)
+        if dd < best_diff:
+            best_diff = dd
+            best = d
+    return best
+
+
+def _tune_multiscale_kan(target, W, k, grid_sizes=(3, 5, 8)):
+    """
+    搜索 MultiScaleKAN 的 hidden 使参数量最接近 target。
+
+    参数公式 (每个分支 i, F_i = gs_i + k + 1):
+      KANLinear(W, h)           : W·h·F_i
+      LayerNorm(h)              : 2·h
+      KANLinear(h, 1)           : h·F_i
+      ──────────────────────────
+      Total = Σ_i [h·(W+1)·F_i + 2·h] + n_branches
+    """
+    n_b = len(grid_sizes)
+    best, best_diff = 8, float('inf')
+    for h in range(2, 64):
+        t = sum(h * (W + 1) * (gs + k + 1) + 2 * h
+                for gs in grid_sizes) + n_b
+        d = abs(t - target)
+        if d < best_diff:
+            best_diff = d
+            best = h
+    return best
+
+
+def _tune_gated_kan(target, W, F):
+    """
+    搜索 GatedKAN 的 hidden_dim 使参数量最接近 target。
+
+    参数公式:
+      signal KANLinear(W, h)    : W·h·F
+      LayerNorm(h)              : 2·h
+      gate KANLinear(W, h)      : W·h·F
+      bypass Linear(W, h)+b     : W·h + h
+      out KANLinear(h, 1)       : h·F
+      ──────────────────────────
+      Total = W·h·(2·F + 1) + h·(F + 3)
+    """
+    best, best_diff = 8, float('inf')
+    for h in range(2, 64):
+        t = W * h * (2 * F + 1) + h * (F + 3)
+        d = abs(t - target)
+        if d < best_diff:
+            best_diff = d
+            best = h
+    return best
+
+
 # ================= 配置生成器 =================
 
 def _build_configs():
     """
-    根据 MATCH_PARAMS 开关和 BASE 基准，生成三个模型的训练配置。
+    根据 MATCH_PARAMS 开关和 BASE 基准，生成八个模型的训练配置。
     MATCH_PARAMS=True 时自动微调隐层维度；False 时使用手动默认值。
     """
     shared = {
@@ -279,28 +397,51 @@ def _build_configs():
 
     W = BASE['window_size']
     F = _kan_factor()
+    k = BASE['spline_order']
 
     if MATCH_PARAMS:
         target = _fcnn_param_count(W, BASE['fcnn_hidden_dims'])
 
+        vanilla_hidden             = _tune_vanilla_kan(target, W, F)
         kan_fcnn_dims              = _tune_kan_fcnn(target, W, F)
         hybrid_dims                = _tune_hybrid_kan(target, W, F)
         res_fcnn_dims, res_kan_hid = _tune_res_kan(target, W, F)
+        conv_nf, conv_kh           = _tune_conv_kan(target, W, F)
+        attn_d                     = _tune_kan_attention(target, F)
+        ms_hidden                  = _tune_multiscale_kan(target, W, k)
+        gated_hidden               = _tune_gated_kan(target, W, F)
     else:
+        vanilla_hidden = 18
         kan_fcnn_dims  = [16, 8]
         hybrid_dims    = [64, 32]
         res_fcnn_dims  = [64, 32]
         res_kan_hid    = 8
+        conv_nf, conv_kh = 8, 8
+        attn_d         = 16
+        ms_hidden      = 8
+        gated_hidden   = 8
 
+    vanilla_cfg  = {**shared, 'vanilla_hidden': vanilla_hidden, 'epochs': 25}
     kan_fcnn_cfg = {**shared, 'hidden_dims': kan_fcnn_dims, 'epochs': 30}
     hybrid_cfg   = {**shared, 'linear_dims': hybrid_dims,   'epochs': 20}
     res_cfg      = {**shared, 'fcnn_dims': res_fcnn_dims,
                                'kan_hidden': res_kan_hid,   'epochs': 20}
+    conv_kan_cfg = {**shared, 'n_filters': conv_nf, 'kernel_size': 5,
+                               'pool_out': 4, 'kan_hidden': conv_kh,
+                               'epochs': 25}
+    attn_cfg     = {**shared, 'd_model': attn_d,             'epochs': 25}
+    ms_cfg       = {**shared, 'ms_hidden': ms_hidden,
+                               'ms_grid_sizes': (3, 5, 8),   'epochs': 25}
+    gated_cfg    = {**shared, 'gated_hidden': gated_hidden,  'epochs': 25}
 
-    return kan_fcnn_cfg, hybrid_cfg, res_cfg
+    return (vanilla_cfg, kan_fcnn_cfg, hybrid_cfg, res_cfg,
+            conv_kan_cfg, attn_cfg, ms_cfg, gated_cfg)
 
 
-KAN_FCNN_CONFIG, HYBRID_KAN_CONFIG, RES_KAN_CONFIG = _build_configs()
+(VANILLA_KAN_CONFIG,
+ KAN_FCNN_CONFIG, HYBRID_KAN_CONFIG, RES_KAN_CONFIG,
+ CONV_KAN_CONFIG, KAN_ATTN_CONFIG,
+ MULTISCALE_KAN_CONFIG, GATED_KAN_CONFIG) = _build_configs()
 
 
 # ================= 数据集定义 =================
@@ -327,6 +468,46 @@ class OpticalDataset(Dataset):
         label_idx = idx + (self.w // self.sps) // 2
         y = self.labels[label_idx] / self.label_scale
         return torch.FloatTensor(x_seq.real), torch.FloatTensor([y])
+
+
+# ============================================================
+#  方案 0:  VanillaKAN — 纯 KAN 基准
+# ============================================================
+class VanillaKANEqualizer(nn.Module):
+    """
+    纯 KAN 均衡器 — 仅由两层 KANLinear 构成，不含任何辅助模块。
+
+    架构: KANLinear(W, h) → KANLinear(h, 1)
+
+    作为 KAN 算法在 IM/DD 均衡中的纯净基准:
+      - 无 LayerNorm / BatchNorm (测试 KAN 裸性能)
+      - 无 Linear / ReLU / CNN / 注意力等辅助结构
+      - 完全依赖 KAN 的 B-样条 + SiLU 基函数进行非线性逼近
+    用于与所有混合方案对比，量化各辅助结构带来的增益。
+    """
+
+    def __init__(self, input_dim, kan_hidden=18,
+                 grid_size=5, spline_order=3, grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.net = nn.Sequential(
+            KANLinear(input_dim, kan_hidden, grid_size, spline_order,
+                      grid_range),
+            KANLinear(kan_hidden, 1, grid_size, spline_order, grid_range),
+        )
+
+    def forward(self, src):
+        x = src.squeeze(-1)
+        return self.net(x)
+
+
+def build_vanilla_kan(config, device):
+    return VanillaKANEqualizer(
+        input_dim    = config['window_size'],
+        kan_hidden   = config['vanilla_hidden'],
+        grid_size    = config['grid_size'],
+        spline_order = config['spline_order'],
+        grid_range   = tuple(config.get('grid_range', (-2.0, 2.0))),
+    ).to(device)
 
 
 # ============================================================
@@ -471,8 +652,237 @@ def build_res_kan(config, device):
     ).to(device)
 
 
+# ============================================================
+#  方案 4:  ConvKAN — 1D 卷积 + KAN 管道
+# ============================================================
+class ConvKANEqualizer(nn.Module):
+    """
+    卷积 + KAN 管道均衡器。
+
+    前端 — 两层 1D 卷积提取局部 ISI 特征（平移不变性）
+    池化 — 自适应平均池化降维
+    后端 — KAN 层进行非线性符号回归
+
+    设计动机 (受 Kolmogorov-Arnold Convolutions [arXiv:2407.01092]
+    和 OFC 2025 CNN 均衡器研究启发):
+      ISI 本质上是信号与信道脉冲响应的卷积，Conv1D 直接建模其逆过程
+      比全连接层更高效且具有平移不变性；KAN 后端处理残余非线性效应
+      (方检波、SOA 非线性、限幅失真等)。
+    """
+
+    def __init__(self, input_dim, n_filters=8, kernel_size=5, pool_out=4,
+                 kan_hidden=8, grid_size=5, spline_order=3,
+                 grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(1, n_filters, kernel_size, padding=kernel_size // 2),
+            nn.ReLU(),
+            nn.Conv1d(n_filters, n_filters, kernel_size,
+                      padding=kernel_size // 2),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(pool_out),
+        )
+        flat_dim = n_filters * pool_out
+        self.kan_head = nn.Sequential(
+            KANLinear(flat_dim, kan_hidden, grid_size, spline_order,
+                      grid_range),
+            nn.LayerNorm(kan_hidden),
+            KANLinear(kan_hidden, 1, grid_size, spline_order, grid_range),
+        )
+
+    def forward(self, src):
+        x = src.squeeze(-1)              # (B, W)
+        x = x.unsqueeze(1)               # (B, 1, W) for Conv1d
+        x = self.conv(x)                 # (B, nf, pool_out)
+        x = x.flatten(1)                 # (B, nf * pool_out)
+        return self.kan_head(x)
+
+
+def build_conv_kan(config, device):
+    return ConvKANEqualizer(
+        input_dim    = config['window_size'],
+        n_filters    = config['n_filters'],
+        kernel_size  = config.get('kernel_size', 5),
+        pool_out     = config.get('pool_out', 4),
+        kan_hidden   = config['kan_hidden'],
+        grid_size    = config['grid_size'],
+        spline_order = config['spline_order'],
+        grid_range   = tuple(config.get('grid_range', (-2.0, 2.0))),
+    ).to(device)
+
+
+# ============================================================
+#  方案 5:  KAN-Attention — 注意力池化 KAN
+# ============================================================
+class KANAttentionEqualizer(nn.Module):
+    """
+    注意力增强 KAN 均衡器。
+
+    将输入窗口的每个采样点嵌入到 d_model 维空间，
+    用 KAN 计算各位置的注意力权重 (动态重要性)，
+    再用 KAN 对特征进行非线性变换后加权池化。
+
+    设计动机 (受 KArAt [OpenReview 2024] 和 IEEE OFC 2024
+    注意力 CNN 均衡器 [200 Gbit/s/λ PAM-4] 启发):
+      IM/DD 系统中 ISI 的影响随位置变化 — 窗口中心附近的采样点
+      包含最多的目标符号信息，而边缘采样点主要提供 ISI 上下文。
+      注意力机制使均衡器能动态聚焦于信息量最大的采样点，
+      KAN 则在注意力计算和特征变换中提供更精确的非线性逼近。
+    """
+
+    def __init__(self, input_dim, d_model=16,
+                 grid_size=5, spline_order=3, grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.embed = nn.Linear(1, d_model)
+        self.attn_kan = KANLinear(d_model, 1, grid_size, spline_order,
+                                  grid_range)
+        self.feat_kan = KANLinear(d_model, d_model, grid_size, spline_order,
+                                  grid_range)
+        self.out_kan  = KANLinear(d_model, 1, grid_size, spline_order,
+                                  grid_range)
+
+    def forward(self, src):
+        x = src if src.dim() == 3 else src.unsqueeze(-1)  # (B, W, 1)
+        x = self.embed(x)                                  # (B, W, d)
+        attn = self.attn_kan(x).squeeze(-1)                # (B, W)
+        attn = F.softmax(attn, dim=-1).unsqueeze(-1)       # (B, W, 1)
+        feat = self.feat_kan(x)                            # (B, W, d)
+        pooled = (attn * feat).sum(dim=1)                  # (B, d)
+        return self.out_kan(pooled)                        # (B, 1)
+
+
+def build_kan_attention(config, device):
+    return KANAttentionEqualizer(
+        input_dim    = config['window_size'],
+        d_model      = config['d_model'],
+        grid_size    = config['grid_size'],
+        spline_order = config['spline_order'],
+        grid_range   = tuple(config.get('grid_range', (-2.0, 2.0))),
+    ).to(device)
+
+
+# ============================================================
+#  方案 6:  MultiScale-KAN — 多尺度并行 KAN
+# ============================================================
+class MultiScaleKANEqualizer(nn.Module):
+    """
+    多尺度并行 KAN 均衡器。
+
+    多个并行 KAN 分支使用不同的 B-样条网格分辨率 (grid_size)，
+    分别捕获粗粒度和细粒度的非线性特征，
+    输出通过可学习 softmax 权重自适应融合。
+
+    设计动机 (受 BSRBF-KAN 双基函数思想和多分辨率分析启发):
+      B-样条的网格密度决定了可表示函数的频率范围 ——
+      粗网格 (grid=3) 捕获低频趋势 (缓变非线性如色散),
+      中网格 (grid=5) 平衡精度与泛化,
+      细网格 (grid=8) 刻画高频细节 (尖锐非线性如限幅/SOA 饱和)。
+      多尺度融合避免了手动选择最优 grid_size 的困难，
+      并在不同信道条件下自适应调整各尺度的贡献权重。
+    """
+
+    def __init__(self, input_dim, hidden=8,
+                 grid_sizes=(3, 5, 8), spline_order=3,
+                 grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.n_branches = len(grid_sizes)
+        self.branches = nn.ModuleList()
+        for gs in grid_sizes:
+            branch = nn.Sequential(
+                KANLinear(input_dim, hidden, gs, spline_order, grid_range),
+                nn.LayerNorm(hidden),
+                KANLinear(hidden, 1, gs, spline_order, grid_range),
+            )
+            self.branches.append(branch)
+        self.fusion_weights = nn.Parameter(
+            torch.ones(self.n_branches) / self.n_branches
+        )
+
+    def forward(self, src):
+        x = src.squeeze(-1)
+        outputs = torch.stack(
+            [branch(x) for branch in self.branches], dim=0
+        )                                                       # (n, B, 1)
+        w = F.softmax(self.fusion_weights, dim=0).view(-1, 1, 1) # (n, 1, 1)
+        return (w * outputs).sum(dim=0)                         # (B, 1)
+
+
+def build_multiscale_kan(config, device):
+    return MultiScaleKANEqualizer(
+        input_dim    = config['window_size'],
+        hidden       = config['ms_hidden'],
+        grid_sizes   = tuple(config.get('ms_grid_sizes', (3, 5, 8))),
+        spline_order = config['spline_order'],
+        grid_range   = tuple(config.get('grid_range', (-2.0, 2.0))),
+    ).to(device)
+
+
+# ============================================================
+#  方案 7:  GatedKAN — 门控双路径 KAN
+# ============================================================
+class GatedKANEqualizer(nn.Module):
+    """
+    门控 KAN 均衡器。
+
+    双路径架构:
+      信号路径 — KAN 层计算候选非线性输出
+      门控路径 — KAN 层 + Sigmoid 生成逐元素门控信号
+      线性旁路 — 标准 Linear 提供稳定基线
+    输出 = gate ⊙ signal + (1 - gate) ⊙ bypass
+
+    设计动机 (受 LSTM/GRU 门控机制和 KAN 2.0 自适应激活选择启发):
+      光通道非线性在特征空间中并非均匀分布 — 某些特征维度
+      受方检波非线性影响显著，另一些则以线性 ISI 为主。
+      门控机制允许网络自适应选择: 在非线性失真明显的维度
+      使用 KAN 信号路径的精确逼近，在线性区域使用简单的
+      线性旁路。这种「按需非线性」策略在训练稳定性和
+      泛化性上优于全局统一的非线性变换。
+    """
+
+    def __init__(self, input_dim, hidden_dim=8,
+                 grid_size=5, spline_order=3, grid_range=(-2.0, 2.0)):
+        super().__init__()
+        self.signal_kan = nn.Sequential(
+            KANLinear(input_dim, hidden_dim, grid_size, spline_order,
+                      grid_range),
+            nn.LayerNorm(hidden_dim),
+        )
+        self.gate_kan = nn.Sequential(
+            KANLinear(input_dim, hidden_dim, grid_size, spline_order,
+                      grid_range),
+            nn.Sigmoid(),
+        )
+        self.bypass = nn.Linear(input_dim, hidden_dim)
+        self.out_kan = KANLinear(hidden_dim, 1, grid_size, spline_order,
+                                 grid_range)
+
+    def forward(self, src):
+        x = src.squeeze(-1)
+        signal = self.signal_kan(x)
+        gate   = self.gate_kan(x)
+        bypass = self.bypass(x)
+        fused  = gate * signal + (1.0 - gate) * bypass
+        return self.out_kan(fused)
+
+
+def build_gated_kan(config, device):
+    return GatedKANEqualizer(
+        input_dim    = config['window_size'],
+        hidden_dim   = config['gated_hidden'],
+        grid_size    = config['grid_size'],
+        spline_order = config['spline_order'],
+        grid_range   = tuple(config.get('grid_range', (-2.0, 2.0))),
+    ).to(device)
+
+
 # ================= 模型注册表 =================
 MODEL_TABLE = {
+    'vanilla_kan': {
+        'display': 'VanillaKAN',
+        'build_fn': build_vanilla_kan,
+        'config': VANILLA_KAN_CONFIG,
+        'ckpt': 'vanilla_kan_model.pth',
+    },
     'kan_fcnn': {
         'display': 'KAN-FCNN',
         'build_fn': build_kan_fcnn,
@@ -490,6 +900,30 @@ MODEL_TABLE = {
         'build_fn': build_res_kan,
         'config': RES_KAN_CONFIG,
         'ckpt': 'res_kan_model.pth',
+    },
+    'conv_kan': {
+        'display': 'ConvKAN',
+        'build_fn': build_conv_kan,
+        'config': CONV_KAN_CONFIG,
+        'ckpt': 'conv_kan_model.pth',
+    },
+    'kan_attn': {
+        'display': 'KAN-Attention',
+        'build_fn': build_kan_attention,
+        'config': KAN_ATTN_CONFIG,
+        'ckpt': 'kan_attn_model.pth',
+    },
+    'multiscale_kan': {
+        'display': 'MultiScale-KAN',
+        'build_fn': build_multiscale_kan,
+        'config': MULTISCALE_KAN_CONFIG,
+        'ckpt': 'multiscale_kan_model.pth',
+    },
+    'gated_kan': {
+        'display': 'GatedKAN',
+        'build_fn': build_gated_kan,
+        'config': GATED_KAN_CONFIG,
+        'ckpt': 'gated_kan_model.pth',
     },
 }
 
@@ -756,8 +1190,13 @@ def train_all(keys=None):
         p = sum(pp.numel() for pp in tmp.parameters())
         dims_info = (cfg.get('hidden_dims') or
                      cfg.get('linear_dims') or
-                     cfg.get('fcnn_dims', []))
-        extra = f", kan_h={cfg['kan_hidden']}" if 'kan_hidden' in cfg else ""
+                     cfg.get('fcnn_dims') or [])
+        extra_parts = []
+        for ek in ('vanilla_hidden', 'kan_hidden', 'n_filters', 'd_model',
+                    'ms_hidden', 'gated_hidden'):
+            if ek in cfg:
+                extra_parts.append(f"{ek}={cfg[ek]}")
+        extra = (", " + ", ".join(extra_parts)) if extra_parts else ""
         print(f"  {entry['display']:15s}  dims={dims_info}{extra}"
               f"  →  {p:,} 参数 (Δ={p - target:+d})")
         del tmp
